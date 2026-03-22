@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  AppWidgetProviderInfo for Fikr Record Widget.
+  - minWidth/minHeight correspond to roughly 2×2 cells on modern launchers.
+  - resizeMode allows both horizontal and vertical resize.
+  - widgetCategory supports home screen and lock screen.
+-->
+<appwidget-provider
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="110dp"
+    android:minHeight="110dp"
+    android:targetCellWidth="2"
+    android:targetCellHeight="2"
+    android:updatePeriodMillis="0"
+    android:initialLayout="@layout/record_widget"
+    android:resizeMode="horizontal|vertical"
+    android:widgetCategory="home_screen"
+    android:previewLayout="@layout/record_widget"
+    android:description="@string/widget_description" />

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- App Group allows the widget extension to read data written
+         by the main app via HomeWidget / UserDefaults(suiteName:).
+         This must match the identifier registered in your Apple Developer
+         account and enabled on BOTH the Runner target and this extension. -->
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>group.com.bigmints.fikr</string>
+    </array>
+</dict>
+</plist>

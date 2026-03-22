@@ -1,0 +1,46 @@
+Launching lib/main.dart on macOS in debug mode...
+Running pod install...                                             11.2s
+Building macOS application...                                   
+warning: Run script build phase 'Create Symlinks to Header Folders' will be run during every build because it does not specify any outputs. To address this issue, either add output dependencies to the script phase, or configure it to run in every build by unchecking "Based on dependency analysis" in the script phase. (in target 'BoringSSL-GRPC' from project 'Pods')
+warning: Run script build phase 'Create Symlinks to Header Folders' will be run during every build because it does not specify any outputs. To address this issue, either add output dependencies to the script phase, or configure it to run in every build by unchecking "Based on dependency analysis" in the script phase. (in target 'abseil' from project 'Pods')
+warning: Run script build phase 'Create Symlinks to Header Folders' will be run during every build because it does not specify any outputs. To address this issue, either add output dependencies to the script phase, or configure it to run in every build by unchecking "Based on dependency analysis" in the script phase. (in target 'gRPC-Core' from project 'Pods')
+warning: Run script build phase 'Create Symlinks to Header Folders' will be run during every build because it does not specify any outputs. To address this issue, either add output dependencies to the script phase, or configure it to run in every build by unchecking "Based on dependency analysis" in the script phase. (in target 'gRPC-C++' from project 'Pods')
+✓ Built build/macos/Build/Products/Debug/Fikr.app
+2026-01-19 18:12:55.674 Fikr[35004:12979932] Running with merged UI and platform thread. Experimental.
+2026-01-19 18:12:55.929 Fikr[35004:12979932] The operation couldn’t be completed. (OSStatus error 13.)
+Syncing files to device macOS...                                    86ms
+
+Flutter run key commands.
+r Hot reload. 🔥🔥🔥
+R Hot restart.
+h List all available interactive commands.
+d Detach (terminate "flutter run" but leave application running).
+c Clear the screen
+q Quit (terminate the application on the device).
+
+A Dart VM Service on macOS is available at: http://127.0.0.1:64286/zEo1EzQRgAQ=/
+The Flutter DevTools debugger and profiler on macOS is available at: http://127.0.0.1:64286/zEo1EzQRgAQ=/devtools/?uri=ws://127.0.0.1:64286/zEo1EzQRgAQ=/ws
+flutter: Firebase Services (Vertex AI, Remote Config) initialized.
+[ERROR:flutter/runtime/dart_vm_initializer.cc(40)] Unhandled Exception: [firebase_messaging/apns-token-not-set] APNS token has not been received on the device yet. Please ensure the APNS token is available before calling `getAPNSToken()`.
+#0      MethodChannelFirebaseMessaging._APNSTokenCheck (package:firebase_messaging_platform_interface/src/method_channel/method_channel_messaging.dart:138:9)
+<asynchronous suspension>
+#1      MethodChannelFirebaseMessaging.getToken (package:firebase_messaging_platform_interface/src/method_channel/method_channel_messaging.dart:244:5)
+<asynchronous suspension>
+#2      main (package:fikr/main.dart:43:20)
+<asynchronous suspension>
+
+
+Performing hot reload...                                        
+Reloaded 5 of 2127 libraries in 1,824ms (compile: 29 ms, reload: 169 ms, reassemble: 34 ms).
+
+Performing hot restart...                                       
+Restarted application in 841ms.
+flutter: Firebase Services (Vertex AI, Remote Config) initialized.
+[ERROR:flutter/runtime/dart_vm_initializer.cc(40)] Unhandled Exception: [firebase_messaging/apns-token-not-set] APNS token has not been received on the device yet. Please ensure the APNS token is available before calling `getAPNSToken()`.
+#0      MethodChannelFirebaseMessaging._APNSTokenCheck (package:firebase_messaging_platform_interface/src/method_channel/method_channel_messaging.dart:138:9)
+<asynchronous suspension>
+#1      MethodChannelFirebaseMessaging.getToken (package:firebase_messaging_platform_interface/src/method_channel/method_channel_messaging.dart:244:5)
+<asynchronous suspension>
+#2      main (package:fikr/main.dart:43:20)
+<asynchronous suspension>
+

@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "69536493117",
+    "project_id": "fikr-apps",
+    "storage_bucket": "fikr-apps.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:69536493117:android:a3cf27f2b8051cc6918454",
+        "android_client_info": {
+          "package_name": "com.bigmints.fikr"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "69536493117-iev9kt0n5raiapvshv2a040pqlgf3etb.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.bigmints.fikr",
+            "certificate_hash": "b06c30e76d1878f8889864d3b32d40fea660b88a"
+          }
+        },
+        {
+          "client_id": "69536493117-o73gr11kiur6up4emvfgfhrufkr69ml5.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDYyZ-c-nP44Qw4iQ2IvT3_13nLmgqiVGU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "69536493117-o73gr11kiur6up4emvfgfhrufkr69ml5.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "69536493117-ikuuen4q38fq8f8rb4mn5ngeqk0birp4.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.bigmints.fikr"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

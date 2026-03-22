@@ -1,0 +1,843 @@
+import 'dart:convert';
+
+import 'package:flutter/material.dart';
+import 'package:get/get.dart';
+import 'package:http/http.dart' as http;
+
+import '../controllers/app_controller.dart';
+import '../controllers/theme_controller.dart';
+
+class SettingsScreen extends StatelessWidget {
+  const SettingsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = Get.find<AppController>();
+    final themeController = Get.find<ThemeController>();
+
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 600),
+            child: ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                const SizedBox(height: 8),
+
+                // Appearance Section
+                _SettingsSection(
+                  title: 'APPEARANCE',
+                  children: [
+                    Obx(
+                      () => _SettingsTile(
+                        title: 'Dark Mode',
+                        trailing: Switch(
+                          value: themeController.isDarkMode.value,
+                          onChanged: (_) => themeController.toggleTheme(),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 24),
+
+                // LLM Configuration Section
+                _SettingsSection(
+                  title: 'LLM CONFIGURATIONS',
+                  children: [
+                    Obx(() {
+                      final active = controller.config.value.provider;
+                      return Column(
+                        children: [
+                          _ProviderTile(
+                            id: 'openai',
+                            label: 'OpenAI',
+                            isActive: active == 'openai',
+                            onTap: () =>
+                                _openConfig(context, 'openai', 'OpenAI'),
+                          ),
+                          _ProviderTile(
+                            id: 'openrouter',
+                            label: 'OpenRouter',
+                            isActive: active == 'openrouter',
+                            onTap: () => _openConfig(
+                              context,
+                              'openrouter',
+                              'OpenRouter',
+                            ),
+                          ),
+                          _ProviderTile(
+                            id: 'google',
+                            label: 'Gemini',
+                            isActive: active == 'google',
+                            onTap: () =>
+                                _openConfig(context, 'google', 'Gemini'),
+                          ),
+                        ],
+                      );
+                    }),
+                  ],
+                ),
+
+                const SizedBox(height: 24),
+
+                // Recording Section
+                _SettingsSection(
+                  title: 'RECORDING',
+                  children: [
+                    _SettingsTile(
+                      title: 'Silence Detection',
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const _SilenceDetectionScreen(),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 24),
+
+                // Advanced Section Removed as models are now in provider settings
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _openConfig(BuildContext context, String id, String label) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) =>
+            _ApiConfigScreen(providerId: id, providerLabel: label),
+      ),
+    );
+  }
+}
+
+class _ProviderTile extends StatelessWidget {
+  final String id;
+  final String label;
+  final bool isActive;
+  final VoidCallback onTap;
+
+  const _ProviderTile({
+    required this.id,
+    required this.label,
+    required this.isActive,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = Get.find<AppController>();
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    // Check if key exists (async UI would be better, but we can assume controller might know?
+    // We'll calculate "Configured" status if possible, but simplest is just showing active.
+
+    return _SettingsTile(
+      title: label,
+      subtitle: isActive ? 'Active' : null,
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (isActive)
+            Icon(
+              Icons.check_circle,
+              color: isDark ? const Color(0xFF73B682) : Colors.green,
+              size: 20,
+            ),
+          const SizedBox(width: 8),
+          const Icon(Icons.chevron_right),
+        ],
+      ),
+      onTap: onTap,
+    );
+  }
+}
+
+class _SettingsSection extends StatelessWidget {
+  final String title;
+  final List<Widget> children;
+
+  const _SettingsSection({required this.title, required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Text(
+            title,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: isDark ? Colors.white60 : Colors.black54,
+              letterSpacing: 0.5,
+            ),
+          ),
+        ),
+        Container(
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1B1A2B) : Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isDark ? Colors.white12 : const Color(0xFFE2E8F0),
+            ),
+          ),
+          child: Column(children: children),
+        ),
+      ],
+    );
+  }
+}
+
+class _SettingsTile extends StatelessWidget {
+  final String title;
+  final String? subtitle;
+  final Widget? trailing;
+  final VoidCallback? onTap;
+
+  const _SettingsTile({
+    required this.title,
+    this.subtitle,
+    this.trailing,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
+                    ),
+                    if (subtitle != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        subtitle!,
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: isDark ? Colors.white60 : Colors.black54,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              if (trailing != null) trailing!,
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ApiConfigScreen extends StatefulWidget {
+  final String providerId;
+  final String providerLabel;
+
+  const _ApiConfigScreen({
+    required this.providerId,
+    required this.providerLabel,
+  });
+
+  @override
+  State<_ApiConfigScreen> createState() => _ApiConfigScreenState();
+}
+
+class _ApiConfigScreenState extends State<_ApiConfigScreen> {
+  late final TextEditingController _apiKeyController;
+  bool _isActive = false;
+  bool _setAsActive = false;
+  bool _validating = false;
+  bool _keysMatched = false;
+  List<String> _models = [];
+  String? _selectedAnalysisModel;
+  String? _selectedTranscriptionModel;
+  String? _storedKey;
+
+  @override
+  void initState() {
+    super.initState();
+    final controller = Get.find<AppController>();
+    _apiKeyController = TextEditingController();
+    _isActive = controller.config.value.provider == widget.providerId;
+    _setAsActive = _isActive;
+    _loadKey();
+  }
+
+  Future<void> _loadKey() async {
+    final controller = Get.find<AppController>();
+    final key = await controller.storage.getApiKey(widget.providerId);
+    if (key != null && key.isNotEmpty) {
+      setState(() {
+        _storedKey = key;
+        _apiKeyController.text = key;
+        _keysMatched = true;
+      });
+      // Auto-load models if key exists
+      await _validateAndLoadModels();
+    }
+  }
+
+  String _maskKey(String key) {
+    if (key.length <= 8) return '••••••••';
+    return '${key.substring(0, 4)}••••${key.substring(key.length - 4)}';
+  }
+
+  Future<void> _validateAndLoadModels() async {
+    final trimmed = _apiKeyController.text.trim();
+    if (trimmed.isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Please enter an API Key')));
+      return;
+    }
+
+    setState(() {
+      _validating = true;
+      _models = [];
+    });
+
+    try {
+      final controller = Get.find<AppController>();
+      final baseUrl = widget.providerId == 'openai'
+          ? 'https://api.openai.com/v1'
+          : 'https://openrouter.ai/api/v1';
+
+      // Temporarily set config to validate
+      final tempConfig = controller.config.value.copyWith(
+        provider: widget.providerId,
+        baseUrl: baseUrl,
+      );
+
+      // Fetch models using the entered key
+      final response = await http.get(
+        Uri.parse('$baseUrl/models'),
+        headers: {
+          'Authorization': 'Bearer $trimmed',
+          if (baseUrl.contains('openrouter'))
+            'HTTP-Referer': 'https://voice-to-thoughts.app',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final modelsList = (data['data'] as List)
+            .map((m) => m['id'] as String)
+            .toList();
+
+        setState(() {
+          _models = modelsList;
+          _validating = false;
+          _keysMatched = trimmed == _storedKey;
+        });
+
+        // Auto-select default models
+        _autoSelectModels();
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✓ Validated. Found ${modelsList.length} models'),
+          ),
+        );
+      } else {
+        setState(() => _validating = false);
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Invalid API Key')));
+      }
+    } catch (e) {
+      setState(() => _validating = false);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Validation failed: $e')));
+    }
+  }
+
+  void _autoSelectModels() {
+    // Filter models based on provider
+    List<String> analysisModels;
+    List<String> transcriptionModels;
+
+    if (widget.providerId == 'openai') {
+      analysisModels = _models
+          .where((m) => m.contains('gpt') || m.contains('o1-'))
+          .toList();
+      transcriptionModels = _models
+          .where((m) => m.contains('whisper'))
+          .toList();
+
+      // Default selections for OpenAI
+      _selectedAnalysisModel = analysisModels.contains('gpt-4o')
+          ? 'gpt-4o'
+          : (analysisModels.contains('gpt-4-turbo')
+                ? 'gpt-4-turbo'
+                : analysisModels.firstOrNull);
+      _selectedTranscriptionModel = transcriptionModels.contains('whisper-1')
+          ? 'whisper-1'
+          : transcriptionModels.firstOrNull;
+    } else if (widget.providerId == 'google') {
+      analysisModels = _models.where((m) => m.contains('google/')).toList();
+      transcriptionModels = _models
+          .where((m) => m.contains('whisper'))
+          .toList();
+
+      _selectedAnalysisModel =
+          analysisModels.contains('google/gemini-2.0-flash-exp:free')
+          ? 'google/gemini-2.0-flash-exp:free'
+          : analysisModels.firstOrNull;
+      _selectedTranscriptionModel = transcriptionModels.contains('whisper-1')
+          ? 'whisper-1'
+          : transcriptionModels.firstOrNull;
+    } else if (widget.providerId == 'anthropic') {
+      analysisModels = _models.where((m) => m.contains('anthropic/')).toList();
+      transcriptionModels = _models
+          .where((m) => m.contains('whisper'))
+          .toList();
+
+      _selectedAnalysisModel =
+          analysisModels.contains('anthropic/claude-3.5-sonnet')
+          ? 'anthropic/claude-3.5-sonnet'
+          : analysisModels.firstOrNull;
+      _selectedTranscriptionModel = transcriptionModels.firstOrNull;
+    } else {
+      // OpenRouter
+      analysisModels = _models;
+      transcriptionModels = _models
+          .where((m) => m.contains('whisper'))
+          .toList();
+
+      _selectedAnalysisModel = analysisModels.firstOrNull;
+      _selectedTranscriptionModel = transcriptionModels.firstOrNull;
+    }
+
+    setState(() {});
+  }
+
+  Future<void> _saveConfiguration() async {
+    final trimmed = _apiKeyController.text.trim();
+    if (trimmed.isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Please enter an API Key')));
+      return;
+    }
+
+    if (_models.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please validate the key first')),
+      );
+      return;
+    }
+
+    final controller = Get.find<AppController>();
+    final baseUrl = widget.providerId == 'openai'
+        ? 'https://api.openai.com/v1'
+        : 'https://openrouter.ai/api/v1';
+
+    // Save API key
+    await controller.storage.saveApiKey(widget.providerId, trimmed);
+
+    // Update configuration
+    final newConfig = controller.config.value.copyWith(
+      provider: _setAsActive
+          ? widget.providerId
+          : controller.config.value.provider,
+      baseUrl: _setAsActive ? baseUrl : controller.config.value.baseUrl,
+      model: _selectedAnalysisModel ?? controller.config.value.model,
+      transcriptionModel:
+          _selectedTranscriptionModel ??
+          controller.config.value.transcriptionModel,
+    );
+
+    await controller.updateConfig(newConfig);
+
+    setState(() {
+      _storedKey = trimmed;
+      _isActive = _setAsActive;
+      _keysMatched = true;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          _setAsActive
+              ? 'Configuration saved and provider activated'
+              : 'Configuration saved',
+        ),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _apiKeyController.dispose();
+    super.dispose();
+  }
+
+  String _getApiKeyLabel() {
+    if (widget.providerId == 'google' || widget.providerId == 'anthropic') {
+      return '${widget.providerLabel.toUpperCase()} API KEY (via OpenRouter)';
+    }
+    return '${widget.providerLabel.toUpperCase()} API KEY';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = Get.find<AppController>();
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Scaffold(
+      appBar: AppBar(title: Text('${widget.providerLabel} Configuration')),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 600),
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              // API Key Section
+              Text(
+                'API KEY',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? Colors.white60 : Colors.black54,
+                  letterSpacing: 0.5,
+                ),
+              ),
+              const SizedBox(height: 8),
+
+              if (_storedKey != null && _keysMatched) ...[
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? Colors.green.withOpacity(0.1)
+                        : Colors.green.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.green.withOpacity(0.3)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.check_circle,
+                        color: Colors.green,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Stored: ${_maskKey(_storedKey!)}',
+                          style: const TextStyle(
+                            color: Colors.green,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          setState(() {
+                            _apiKeyController.clear();
+                            _keysMatched = false;
+                          });
+                        },
+                        child: const Text('Change'),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
+
+              if (!_keysMatched) ...[
+                TextField(
+                  controller: _apiKeyController,
+                  obscureText: true,
+                  decoration: InputDecoration(
+                    hintText: 'sk-...',
+                    border: const OutlineInputBorder(),
+                    labelText: _getApiKeyLabel(),
+                  ),
+                ),
+                if (widget.providerId != 'openai') ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    'Get your key at openrouter.ai/keys',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isDark ? Colors.white54 : Colors.black45,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 16),
+                FilledButton.icon(
+                  onPressed: _validating ? null : _validateAndLoadModels,
+                  icon: _validating
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.verified_user),
+                  label: Text(_validating ? 'Validating...' : 'Validate Key'),
+                ),
+              ],
+
+              const SizedBox(height: 32),
+
+              // Model Configuration Section
+              Text(
+                'MODEL SETTINGS',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? Colors.white60 : Colors.black54,
+                  letterSpacing: 0.5,
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              if (_models.isEmpty && !_validating)
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: isDark ? Colors.white10 : Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Text(
+                    'Enter and validate an API Key to configure models.',
+                    style: TextStyle(fontSize: 14),
+                  ),
+                )
+              else if (_validating)
+                const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(24.0),
+                    child: CircularProgressIndicator(),
+                  ),
+                )
+              else ...[
+                DropdownButtonFormField<String>(
+                  value: _selectedAnalysisModel,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Analysis Model',
+                    border: OutlineInputBorder(),
+                    helperText: 'Model used for structuring notes',
+                  ),
+                  items: _models
+                      .where((m) => !m.contains('whisper'))
+                      .map(
+                        (m) => DropdownMenuItem(
+                          value: m,
+                          child: Text(m, overflow: TextOverflow.ellipsis),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (val) =>
+                      setState(() => _selectedAnalysisModel = val),
+                ),
+                const SizedBox(height: 16),
+
+                if (_models.any((m) => m.contains('whisper')))
+                  DropdownButtonFormField<String>(
+                    value: _selectedTranscriptionModel,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Transcription Model',
+                      border: OutlineInputBorder(),
+                      helperText: 'Model used for speech-to-text',
+                    ),
+                    items: _models
+                        .where((m) => m.contains('whisper'))
+                        .map(
+                          (m) => DropdownMenuItem(
+                            value: m,
+                            child: Text(m, overflow: TextOverflow.ellipsis),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (val) =>
+                        setState(() => _selectedTranscriptionModel = val),
+                  ),
+              ],
+
+              const SizedBox(height: 32),
+
+              // Set as Active Toggle
+              if (!_isActive)
+                CheckboxListTile(
+                  title: const Text('Set as Active Provider'),
+                  subtitle: const Text('Use this provider for new notes'),
+                  value: _setAsActive,
+                  onChanged: (val) =>
+                      setState(() => _setAsActive = val ?? false),
+                  controlAffinity: ListTileControlAffinity.leading,
+                ),
+
+              if (_isActive)
+                Container(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? Colors.green.withOpacity(0.1)
+                        : Colors.green.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.green.withOpacity(0.3)),
+                  ),
+                  child: const Text(
+                    '✓ Currently Active Provider',
+                    style: TextStyle(
+                      color: Colors.green,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+
+              const SizedBox(height: 24),
+
+              // Save Button
+              FilledButton.icon(
+                onPressed: _models.isEmpty ? null : _saveConfiguration,
+                icon: const Icon(Icons.save),
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                ),
+                label: const Text('Save Configuration'),
+              ),
+
+              const SizedBox(height: 32),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SilenceDetectionScreen extends StatefulWidget {
+  const _SilenceDetectionScreen();
+
+  @override
+  State<_SilenceDetectionScreen> createState() =>
+      _SilenceDetectionScreenState();
+}
+
+class _SilenceDetectionScreenState extends State<_SilenceDetectionScreen> {
+  late final TextEditingController _silenceController;
+
+  @override
+  void initState() {
+    super.initState();
+    final config = Get.find<AppController>().config.value;
+    _silenceController = TextEditingController(
+      text: config.silenceSeconds.toString(),
+    );
+  }
+
+  @override
+  void dispose() {
+    _silenceController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = Get.find<AppController>();
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Silence Detection')),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 600),
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              Text(
+                'SILENCE THRESHOLD (SECONDS)',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? Colors.white60 : Colors.black54,
+                  letterSpacing: 0.5,
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _silenceController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  hintText: '3',
+                  border: OutlineInputBorder(),
+                  helperText:
+                      'Recording stops after this many seconds of silence',
+                ),
+              ),
+              const SizedBox(height: 24),
+              FilledButton(
+                onPressed: () async {
+                  final value = int.tryParse(_silenceController.text.trim());
+                  if (value == null || value < 1) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Please enter a valid number'),
+                      ),
+                    );
+                    return;
+                  }
+
+                  await controller.updateConfig(
+                    controller.config.value.copyWith(silenceSeconds: value),
+                  );
+                  if (!context.mounted) return;
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Silence threshold updated')),
+                  );
+                },
+                child: const Text('Save'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// _AdvancedSettingsScreen removed

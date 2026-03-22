@@ -1,0 +1,88 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+
+        {
+            "name": "Flutter (macOS)",
+            "type": "dart",
+            "request": "launch",
+            "program": "lib/main.dart",
+            "args": [
+                "-d",
+                "macos"
+            ]
+        },
+        {
+            "name": "Flutter (iPhone Simulator)",
+            "type": "dart",
+            "request": "launch",
+            "program": "lib/main.dart",
+            "args": [
+                "-d",
+                "7405475F-B442-4E18-8667-0201FE4BDEDC"
+            ]
+        },
+        {
+            "name": "Flutter (ipad Simulator)",
+            "type": "dart",
+            "request": "launch",
+            "program": "lib/main.dart",
+            "args": [
+                "-d",
+                "CE4BE238-C967-4F44-84F6-F29551AF7395"
+            ]
+        },
+        {
+            "name": "Flutter (Android Emulator)",
+            "type": "dart",
+            "request": "launch",
+            "program": "lib/main.dart",
+            "args": [
+                "-d",
+                "emulator-5554"
+            ]
+        },
+        {
+            "name": "Flutter (AC2001 - Android 16)",
+            "type": "dart",
+            "request": "launch",
+            "program": "lib/main.dart",
+            "args": [
+                "-d",
+                "a1289ecc"
+            ]
+        },
+        {
+            "name": "Flutter (iPhone)",
+            "type": "dart",
+            "request": "launch",
+            "program": "lib/main.dart",
+            "args": [
+                "-d",
+                "00008110-001518CC260A801E"
+            ]
+        },
+        {
+            "name": "Flutter (Profile - macOS)",
+            "type": "dart",
+            "request": "launch",
+            "program": "lib/main.dart",
+            "flutterMode": "profile",
+            "args": [
+                "-d",
+                "macos"
+            ]
+        },
+        {
+            "name": "Flutter (Release - macOS)",
+            "type": "dart",
+            "request": "launch",
+            "program": "lib/main.dart",
+            "flutterMode": "release",
+            "args": [
+                "-d",
+                "macos"
+            ]
+        }
+    ]
+}
