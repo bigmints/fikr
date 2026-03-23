@@ -18,12 +18,13 @@ class DetailAudioPlayer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (controller.note.audioPath == null) return const SizedBox.shrink();
+    if (!controller.hasAudio) return const SizedBox.shrink();
 
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
     return Obx(() {
+      final isLoading = controller.isLoadingAudio.value;
       final isPlaying = controller.isPlaying.value;
       final duration = controller.duration.value;
       final position = controller.position.value;
@@ -50,7 +51,7 @@ class DetailAudioPlayer extends StatelessWidget {
           children: [
             // Play / Pause button
             GestureDetector(
-              onTap: controller.togglePlayback,
+              onTap: isLoading ? null : controller.togglePlayback,
               child: Container(
                 width: 40,
                 height: 40,
@@ -58,11 +59,16 @@ class DetailAudioPlayer extends StatelessWidget {
                   color: AppPalette.primary.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Icon(
-                  isPlaying ? FeatherIcons.pause : FeatherIcons.play,
-                  size: 16,
-                  color: AppPalette.primary,
-                ),
+                child: isLoading
+                    ? const Padding(
+                        padding: EdgeInsets.all(10),
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Icon(
+                        isPlaying ? FeatherIcons.pause : FeatherIcons.play,
+                        size: 16,
+                        color: AppPalette.primary,
+                      ),
               ),
             ),
             const SizedBox(width: AppSpacing.sm),

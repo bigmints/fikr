@@ -9,8 +9,8 @@ import '../../models/app_config.dart';
 import '../../models/note.dart';
 import '../../widgets/collapsing_header.dart';
 import '../../utils/app_spacing.dart';
-import '../note_detail_screen.dart';
 import '../../utils/layout.dart';
+import '../note_detail_screen.dart';
 import 'widgets/note_card.dart';
 
 class MobileHome extends StatelessWidget {
@@ -157,64 +157,67 @@ class MobileHome extends StatelessWidget {
         notes.isEmpty
             ? const SliverToBoxAdapter(child: SizedBox.shrink())
             : SliverToBoxAdapter(
-                child: Padding(
-                  padding: isDesktop
-                      ? const EdgeInsets.all(0)
-                      : EdgeInsets.all(AppSpacing.pageHorizontal),
-                  child: SizedBox(
-                    height: 44,
-                    child: ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: entries.length,
-                      separatorBuilder: (context, index) =>
-                          const SizedBox(width: 8),
-                      itemBuilder: (context, index) {
-                        final entry = entries[index];
-                        final selected =
-                            entry.key == appController.selectedBucket.value;
-                        return ChoiceChip(
-                          label: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (entry.key != 'All') ...[
-                                Container(
-                                  width: 6,
-                                  height: 6,
-                                  decoration: BoxDecoration(
-                                    color: AppConfig.getBucketColor(entry.key),
-                                    shape: BoxShape.circle,
+                child: ResponsiveCenter(
+                  maxWidth: kContentMaxWidth,
+                  child: Padding(
+                    padding: isDesktop
+                        ? const EdgeInsets.all(0)
+                        : EdgeInsets.all(AppSpacing.pageHorizontal),
+                    child: SizedBox(
+                      height: 44,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: entries.length,
+                        separatorBuilder: (context, index) =>
+                            const SizedBox(width: 8),
+                        itemBuilder: (context, index) {
+                          final entry = entries[index];
+                          final selected =
+                              entry.key == appController.selectedBucket.value;
+                          return ChoiceChip(
+                            label: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (entry.key != 'All') ...[
+                                  Container(
+                                    width: 6,
+                                    height: 6,
+                                    decoration: BoxDecoration(
+                                      color: AppConfig.getBucketColor(entry.key),
+                                      shape: BoxShape.circle,
+                                    ),
                                   ),
-                                ),
-                                const SizedBox(width: 8),
+                                  const SizedBox(width: 8),
+                                ],
+                                Text(entry.key),
                               ],
-                              Text(entry.key),
-                            ],
-                          ),
-                          selected: selected,
-                          onSelected: (_) {
-                            appController.selectedBucket.value = entry.key;
-                          },
-                          showCheckmark: false,
-                          labelStyle: TextStyle(
-                            color: selected
-                                ? Colors.white
-                                : theme.colorScheme.onSurface,
-                          ),
-                          selectedColor: AppPalette.primary,
-                          backgroundColor: Colors.transparent,
-                          shape: const StadiumBorder(
-                            side: BorderSide(style: BorderStyle.none),
-                          ),
-                          side: BorderSide(
-                            color: selected
-                                ? AppPalette.primary
-                                : theme.colorScheme.outline.withValues(
-                                    alpha: 0.3,
-                                  ),
-                            width: 1,
-                          ),
-                        );
-                      },
+                            ),
+                            selected: selected,
+                            onSelected: (_) {
+                              appController.selectedBucket.value = entry.key;
+                            },
+                            showCheckmark: false,
+                            labelStyle: TextStyle(
+                              color: selected
+                                  ? Colors.white
+                                  : theme.colorScheme.onSurface,
+                            ),
+                            selectedColor: AppPalette.primary,
+                            backgroundColor: Colors.transparent,
+                            shape: const StadiumBorder(
+                              side: BorderSide(style: BorderStyle.none),
+                            ),
+                            side: BorderSide(
+                              color: selected
+                                  ? AppPalette.primary
+                                  : theme.colorScheme.outline.withValues(
+                                      alpha: 0.3,
+                                    ),
+                              width: 1,
+                            ),
+                          );
+                        },
+                      ),
                     ),
                   ),
                 ),
@@ -230,35 +233,57 @@ class MobileHome extends StatelessWidget {
             ),
           )
         else
-          SliverPadding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.pageHorizontal,
-              vertical: AppSpacing.md,
-            ),
-            sliver: SliverList(
-              delegate: SliverChildBuilderDelegate((context, index) {
-                final item = groupedNotes[index];
-                if (item is String) {
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: AppSpacing.md),
-                    child: Text(
-                      item,
-                      style: Theme.of(
-                        context,
-                      ).textTheme.labelMedium?.copyWith(color: Colors.grey),
+          SliverToBoxAdapter(
+            child: ResponsiveCenter(
+              maxWidth: kContentMaxWidth,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.pageHorizontal,
+                  vertical: AppSpacing.md,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Builder(
+                      builder: (context) {
+                        final items = groupedNotes;
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            for (int i = 0; i < items.length; i++)
+                              if (items[i] is String)
+                                Padding(
+                                  padding: const EdgeInsets.only(
+                                    bottom: AppSpacing.md,
+                                  ),
+                                  child: Text(
+                                    items[i] as String,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .labelMedium
+                                        ?.copyWith(color: Colors.grey),
+                                  ),
+                                )
+                              else if (items[i] is Note)
+                                Padding(
+                                  padding: const EdgeInsets.only(
+                                    bottom: AppSpacing.md,
+                                  ),
+                                  child: NoteCard(
+                                    note: items[i] as Note,
+                                    onTap: () => NoteDetailScreen.show(
+                                      context,
+                                      items[i] as Note,
+                                    ),
+                                  ),
+                                ),
+                          ],
+                        );
+                      },
                     ),
-                  );
-                } else if (item is Note) {
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: AppSpacing.md),
-                    child: NoteCard(
-                      note: item,
-                      onTap: () => NoteDetailScreen.show(context, item),
-                    ),
-                  );
-                }
-                return const SizedBox.shrink();
-              }, childCount: groupedNotes.length),
+                  ],
+                ),
+              ),
             ),
           ),
 

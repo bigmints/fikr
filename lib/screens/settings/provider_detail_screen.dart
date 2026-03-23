@@ -65,8 +65,6 @@ class _ProviderDetailScreenState extends State<ProviderDetailScreen> {
         return 'https://platform.openai.com/api-keys';
       case LLMProviderType.google:
         return 'https://aistudio.google.com/app/apikey';
-      case LLMProviderType.openrouter:
-        return 'https://openrouter.ai/keys';
     }
   }
 
@@ -76,8 +74,6 @@ class _ProviderDetailScreenState extends State<ProviderDetailScreen> {
         return 'sk-...';
       case LLMProviderType.google:
         return 'AIza...';
-      case LLMProviderType.openrouter:
-        return 'sk-or-...';
     }
   }
 
@@ -131,11 +127,9 @@ class _ProviderDetailScreenState extends State<ProviderDetailScreen> {
         await controller.storage.setAIDataConsent(true);
       }
 
-      // Update config — models are auto-set from provider type defaults
+      // Models come from Remote Config — no need to save them locally
       final nextConfig = controller.config.value.copyWith(
         activeProvider: newProvider,
-        analysisModel: _selectedType.defaultAnalysisModel,
-        transcriptionModel: _selectedType.defaultTranscriptionModel,
       );
 
       await controller.updateConfig(nextConfig);

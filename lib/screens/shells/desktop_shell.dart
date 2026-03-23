@@ -41,85 +41,104 @@ class DesktopShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        _PrimarySidebar(
-          currentIndex: index,
-          onSelect: onSelect,
-          onRecord: onRecord,
-        ),
-        Expanded(
-          child: Column(
-            children: [
-              _DesktopTopBar(
-                title: title,
-                showSettings: index != 3,
-                onSettings: onSettings,
-                isSearching: isSearching,
-                searchQuery: searchQuery,
-                onSearchChanged: onSearchChanged,
-                onSearchToggle: onSearchToggle,
-                actions: index == 0
-                    ? [
-                        IconButton(
-                          onPressed: () async {
-                            final appController = Get.find<AppController>();
-                            final note = await appController.createEmptyNote();
-                            if (context.mounted) {
-                              NoteDetailScreen.show(context, note);
-                            }
-                          },
-                          icon: const Icon(
-                            FeatherIcons.edit2,
-                            size: 18,
-                          ),
-                          tooltip: 'New Note',
-                        ),
-                        Obx(() {
-                          final appController = Get.find<AppController>();
-                          if (appController.notes.isEmpty) {
-                            return const SizedBox.shrink();
-                          }
-                          return Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
+    bool isScrolled = false;
+
+    return StatefulBuilder(
+      builder: (context, setState) {
+        return Row(
+          children: [
+            _PrimarySidebar(
+              currentIndex: index,
+              onSelect: onSelect,
+              onRecord: onRecord,
+            ),
+            Expanded(
+              child: NotificationListener<ScrollNotification>(
+                onNotification: (notification) {
+                  if (notification.metrics.axis == Axis.vertical) {
+                    final shouldShow = notification.metrics.pixels > 10;
+                    if (shouldShow != isScrolled) {
+                      setState(() => isScrolled = shouldShow);
+                    }
+                  }
+                  return false;
+                },
+                child: Column(
+                  children: [
+                    _DesktopTopBar(
+                      title: title,
+                      isScrolled: isScrolled,
+                      showSettings: index != 3,
+                      onSettings: onSettings,
+                      isSearching: isSearching,
+                      searchQuery: searchQuery,
+                      onSearchChanged: onSearchChanged,
+                      onSearchToggle: onSearchToggle,
+                      actions: index == 0
+                          ? [
                               IconButton(
-                                onPressed: onSearchToggle,
-                                icon: Icon(
-                                  isSearching
-                                      ? FeatherIcons.x
-                                      : FeatherIcons.search,
+                                onPressed: () async {
+                                  final appController = Get.find<AppController>();
+                                  final note =
+                                      await appController.createEmptyNote();
+                                  if (context.mounted) {
+                                    NoteDetailScreen.show(context, note);
+                                  }
+                                },
+                                icon: const Icon(
+                                  FeatherIcons.edit2,
                                   size: 18,
                                 ),
-                                tooltip: isSearching
-                                    ? 'Close Search'
-                                    : 'Search',
+                                tooltip: 'New Note',
                               ),
-                              IconButton(
-                                onPressed: onToggleFilters,
-                                icon: Icon(
-                                  showFilters
-                                      ? FeatherIcons.filter
-                                      : FeatherIcons.filter,
-                                  size: 18,
-                                ),
-                                tooltip: showFilters
-                                    ? 'Hide Filters'
-                                    : 'Show Filters',
-                              ),
-                            ],
-                          );
-                        }),
-                      ]
-                    : index == 1 && insightsActions != null
-                    ? [insightsActions!]
-                    : null,
+                              Obx(() {
+                                final appController = Get.find<AppController>();
+                                if (appController.notes.isEmpty) {
+                                  return const SizedBox.shrink();
+                                }
+                                return Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    IconButton(
+                                      onPressed: onSearchToggle,
+                                      icon: Icon(
+                                        isSearching
+                                            ? FeatherIcons.x
+                                            : FeatherIcons.search,
+                                        size: 18,
+                                      ),
+                                      tooltip: isSearching
+                                          ? 'Close Search'
+                                          : 'Search',
+                                    ),
+                                    IconButton(
+                                      onPressed: onToggleFilters,
+                                      icon: Icon(
+                                        showFilters
+                                            ? FeatherIcons.filter
+                                            : FeatherIcons.filter,
+                                        size: 18,
+                                      ),
+                                      tooltip: showFilters
+                                          ? 'Hide Filters'
+                                          : 'Show Filters',
+                                    ),
+                                  ],
+                                );
+                              }),
+                            ]
+                          : index == 1 && insightsActions != null
+                          ? [insightsActions!]
+                          : null,
+                    ),
+                    Expanded(child: body),
+                  ],
+                ),
               ),
-              Expanded(child: body),
-            ],
-          ),
-        ),
-      ],
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -127,6 +146,7 @@ class DesktopShell extends StatelessWidget {
 class _DesktopTopBar extends StatefulWidget {
   const _DesktopTopBar({
     required this.title,
+    this.isScrolled = false,
     required this.showSettings,
     required this.onSettings,
     this.actions,
@@ -137,6 +157,7 @@ class _DesktopTopBar extends StatefulWidget {
   });
 
   final String title;
+  final bool isScrolled;
   final bool showSettings;
   final VoidCallback onSettings;
   final List<Widget>? actions;
@@ -175,16 +196,73 @@ class _DesktopTopBarState extends State<_DesktopTopBar> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Container(
-      height: 64,
-      padding: const EdgeInsets.symmetric(horizontal: 24),
+    final isDark = theme.brightness == Brightness.dark;
+    final colorScheme = theme.colorScheme;
+
+    // Page-specific gradient colours matching the mobile collapsing header
+    final gradientColors = switch (widget.title) {
+      'Insights' => isDark
+          ? const [Color(0xFF34D399), Color(0xFF6EE7B7)]
+          : const [Color(0xFF059669), Color(0xFF10B981)],
+      'Tasks' => isDark
+          ? const [Color(0xFFF97316), Color(0xFFFBBF24)]
+          : const [Color(0xFFEA580C), Color(0xFFCA8A04)],
+      'Settings' => isDark
+          ? const [Color(0xFF818CF8), Color(0xFFC084FC)]
+          : const [Color(0xFF4F46E5), Color(0xFF9333EA)],
+      _ /* Notes */ => isDark
+          ? const [Color(0xFF3CA6A6), Color(0xFF67E8F9), Color(0xFFA78BFA)]
+          : const [Color(0xFF0D9488), Color(0xFF2563EB), Color(0xFF7C3AED)],
+    };
+
+    final topPadding = MediaQuery.paddingOf(context).top;
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      height: 60 + topPadding,
+      padding: EdgeInsets.only(
+        top: topPadding,
+        left: 24,
+        right: 24,
+      ),
       decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: theme.dividerColor)),
+        color: widget.isScrolled
+            ? colorScheme.surface.withValues(alpha: 0.95)
+            : Colors.transparent,
+        border: Border(
+          bottom: BorderSide(
+            color: widget.isScrolled
+                ? colorScheme.onSurface.withValues(alpha: 0.07)
+                : Colors.transparent,
+          ),
+        ),
       ),
       alignment: Alignment.centerLeft,
       child: Row(
         children: [
-          Text(widget.title, style: theme.textTheme.titleMedium),
+          // Logo in header, undecorated
+          SvgPicture.asset(
+            Assets.getLogo(context),
+            width: 24,
+            height: 24,
+            fit: BoxFit.contain,
+          ),
+          const SizedBox(width: 12),
+          ShaderMask(
+            shaderCallback: (bounds) => LinearGradient(
+              colors: gradientColors,
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ).createShader(bounds),
+            child: Text(
+              widget.title,
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: Colors.white,
+                letterSpacing: -0.3,
+              ),
+            ),
+          ),
           const Spacer(),
           if (widget.isSearching)
             _ExpandingSearchField(
@@ -253,6 +331,8 @@ class _ExpandingSearchField extends StatelessWidget {
   }
 }
 
+// ── Docked FAB-style Rail ─────────────────────────────────
+
 class _PrimarySidebar extends StatelessWidget {
   const _PrimarySidebar({
     required this.currentIndex,
@@ -264,100 +344,105 @@ class _PrimarySidebar extends StatelessWidget {
   final ValueChanged<int> onSelect;
   final VoidCallback onRecord;
 
+  static const _items = [
+    (icon: FeatherIcons.fileText,    label: 'Notes',    index: 0),
+    (icon: FeatherIcons.trendingUp,  label: 'Insights', index: 1),
+    (icon: FeatherIcons.checkSquare, label: 'Tasks',    index: 2),
+    (icon: FeatherIcons.settings,    label: 'Settings', index: 3),
+  ];
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return Container(
-      width: 220,
-      decoration: BoxDecoration(
-        color: colorScheme.surface,
-        border: Border(
-          right: BorderSide(color: Theme.of(context).dividerColor),
-        ),
-      ),
+    // Top items (Notes, Insights)
+    final topItems = _items.sublist(0, 2);
+    // Bottom items (Tasks, Settings)
+    final bottomItems = _items.sublist(2);
+
+    return SizedBox(
+      width: 80,
       child: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 20, 16, 20),
+          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Row(
-                children: [
-                  CircleAvatar(
-                    radius: 16,
-                    backgroundColor: colorScheme.surfaceContainerHighest,
-                    child: SvgPicture.asset(
-                      Assets.getLogo(context),
-                      fit: BoxFit.contain,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  const Expanded(
-                    child: Text(
-                      'Fikr',
-                      style: TextStyle(),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                child: Obx(() {
-                  final recordController = Get.find<RecordController>();
-                  final isRecording = recordController.isRecording.value;
-                  return FilledButton.icon(
-                    onPressed: onRecord,
-                    icon: Icon(
-                      isRecording
-                          ? FeatherIcons.square
-                          : FeatherIcons.mic,
-                      size: 16,
-                    ),
-                    label: Text(isRecording ? 'Stop Recording' : 'Record'),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: isRecording ? Colors.red : null,
-                      foregroundColor: isRecording ? Colors.white : null,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+              // ── Top nav items ──
+              _DockedCard(
+                isDark: isDark,
+                colorScheme: colorScheme,
+                child: Column(
+                  children: [
+                    for (final item in topItems)
+                      _RailItem(
+                        icon: item.icon,
+                        label: item.label,
+                        selected: currentIndex == item.index,
+                        onTap: () => onSelect(item.index),
+                        colorScheme: colorScheme,
                       ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 12),
+
+              // ── FAB (Record) ──
+              Obx(() {
+                final rc = Get.find<RecordController>();
+                final isRecording = rc.isRecording.value;
+                return GestureDetector(
+                  onTap: onRecord,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    width: 56,
+                    height: 56,
+                    decoration: BoxDecoration(
+                      color: isRecording
+                          ? const Color(0xFFEF4444)
+                          : colorScheme.primary,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: (isRecording
+                                  ? const Color(0xFFEF4444)
+                                  : colorScheme.primary)
+                              .withValues(alpha: 0.4),
+                          blurRadius: 16,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
                     ),
-                  );
-                }),
+                    child: Icon(
+                      isRecording ? FeatherIcons.square : FeatherIcons.mic,
+                      color: Colors.white,
+                      size: isRecording ? 20 : 24,
+                    ),
+                  ),
+                );
+              }),
+
+              const SizedBox(height: 12),
+
+              // ── Bottom nav items ──
+              _DockedCard(
+                isDark: isDark,
+                colorScheme: colorScheme,
+                child: Column(
+                  children: [
+                    for (final item in bottomItems)
+                      _RailItem(
+                        icon: item.icon,
+                        label: item.label,
+                        selected: currentIndex == item.index,
+                        onTap: () => onSelect(item.index),
+                        colorScheme: colorScheme,
+                      ),
+                  ],
+                ),
               ),
-              const SizedBox(height: 24),
-              _SidebarItem(
-                label: 'Notes',
-                icon: FeatherIcons.fileText,
-                activeIcon: FeatherIcons.fileText,
-                selected: currentIndex == 0,
-                onTap: () => onSelect(0),
-              ),
-              _SidebarItem(
-                label: 'Insights',
-                icon: FeatherIcons.trendingUp,
-                activeIcon: FeatherIcons.trendingUp,
-                selected: currentIndex == 1,
-                onTap: () => onSelect(1),
-              ),
-              _SidebarItem(
-                label: 'Tasks',
-                icon: FeatherIcons.checkSquare,
-                activeIcon: FeatherIcons.checkSquare,
-                selected: currentIndex == 2,
-                onTap: () => onSelect(2),
-              ),
-              _SidebarItem(
-                label: 'Settings',
-                icon: FeatherIcons.settings,
-                activeIcon: FeatherIcons.settings,
-                selected: currentIndex == 3,
-                onTap: () => onSelect(3),
-              ),
-              const Spacer(),
             ],
           ),
         ),
@@ -366,37 +451,96 @@ class _PrimarySidebar extends StatelessWidget {
   }
 }
 
-class _SidebarItem extends StatelessWidget {
-  const _SidebarItem({
-    required this.label,
-    required this.icon,
-    required this.activeIcon,
-    required this.selected,
-    required this.onTap,
+/// Frosted-glass card container for docked rail sections.
+class _DockedCard extends StatelessWidget {
+  const _DockedCard({
+    required this.isDark,
+    required this.colorScheme,
+    required this.child,
   });
 
-  final String label;
-  final IconData icon;
-  final IconData activeIcon;
-  final bool selected;
-  final VoidCallback onTap;
+  final bool isDark;
+  final ColorScheme colorScheme;
+  final Widget child;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark
+            ? colorScheme.surface.withValues(alpha: 0.85)
+            : colorScheme.surface.withValues(alpha: 0.92),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.07)
+              : Colors.black.withValues(alpha: 0.06),
+          width: 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.08),
+            blurRadius: 20,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: child,
+    );
+  }
+}
 
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: ListTile(
-        onTap: onTap,
-        selected: selected,
-        leading: Icon(selected ? activeIcon : icon, size: 18),
-        title: Text(label, style: theme.textTheme.bodyMedium),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        selectedTileColor: colorScheme.primaryContainer.withValues(alpha: 0.1),
-        selectedColor: colorScheme.primary,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+/// Single icon+label item for the docked FAB rail.
+class _RailItem extends StatelessWidget {
+  const _RailItem({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    required this.colorScheme,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  final ColorScheme colorScheme;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = selected
+        ? colorScheme.primary
+        : colorScheme.onSurface.withValues(alpha: 0.45);
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          color: selected
+              ? colorScheme.primary.withValues(alpha: 0.1)
+              : Colors.transparent,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 20, color: color),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                color: color,
+                letterSpacing: 0.1,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -11,6 +11,7 @@ import '../../services/sync_service.dart';
 import '../../services/toast_service.dart';
 import '../../widgets/collapsing_header.dart';
 import '../../utils/app_spacing.dart';
+import '../../utils/layout.dart';
 
 import 'provider_detail_screen.dart';
 import 'widgets/fikr_cloud_banner.dart';
@@ -56,7 +57,8 @@ class MobileSettings extends StatelessWidget {
           ),
 
           SliverToBoxAdapter(
-            child: Padding(
+            child: ResponsiveCenter(
+              maxWidth: kSettingsMaxWidth,
               padding: EdgeInsets.symmetric(
                 horizontal: AppSpacing.pageHorizontal,
                 vertical: AppSpacing.xl,
@@ -111,83 +113,84 @@ class MobileSettings extends StatelessWidget {
                             ),
                           );
                         }),
-                        if (Get.find<SubscriptionController>().canSync)
-                          Obx(() {
-                            final sync = Get.find<SyncService>();
-                            final syncing = sync.isSyncing.value;
-                            return ListTile(
-                              leading: Icon(
-                                FeatherIcons.uploadCloud,
-                                size: 20,
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onSurface.withValues(alpha: 0.7),
-                              ),
-                              title: Text(
-                                syncing
-                                    ? 'Syncing…'
-                                    : sync.lastSyncTime.value != null &&
-                                          sync.syncError.value.isEmpty
-                                    ? 'Everything synced'
-                                    : 'Sync Now',
-                                style: Theme.of(context).textTheme.bodyMedium,
-                              ),
-                              trailing: syncing
-                                  ? SizedBox(
-                                      width: 18,
-                                      height: 18,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        color: Theme.of(
-                                          context,
-                                        ).colorScheme.primary,
-                                      ),
-                                    )
+                        Obx(() {
+                          final sub = Get.find<SubscriptionController>();
+                          if (!sub.canSync) return const SizedBox.shrink();
+                          final sync = Get.find<SyncService>();
+                          final syncing = sync.isSyncing.value;
+                          return ListTile(
+                            leading: Icon(
+                              FeatherIcons.uploadCloud,
+                              size: 20,
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onSurface.withValues(alpha: 0.7),
+                            ),
+                            title: Text(
+                              syncing
+                                  ? 'Syncing…'
                                   : sync.lastSyncTime.value != null &&
                                         sync.syncError.value.isEmpty
-                                  ? Icon(
-                                      Icons.check_circle_rounded,
-                                      size: 18,
-                                      color: Colors.green.shade500,
-                                    )
-                                  : Icon(
-                                      FeatherIcons.chevronRight,
-                                      size: 16,
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .onSurface
-                                          .withValues(alpha: 0.3),
+                                  ? 'Everything synced'
+                                  : 'Sync Now',
+                              style: Theme.of(context).textTheme.bodyMedium,
+                            ),
+                            trailing: syncing
+                                ? SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.primary,
                                     ),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(14),
-                              ),
-                              onTap:
-                                  syncing ||
-                                      (sync.lastSyncTime.value != null &&
-                                          sync.syncError.value.isEmpty)
-                                  ? null
-                                  : () async {
-                                      await sync.syncToCloud();
-                                      if (context.mounted) {
-                                        if (sync.syncError.value.isEmpty) {
-                                          ToastService.showSuccess(
-                                            context,
-                                            title: 'Synced',
-                                            description:
-                                                'Your notes are up to date.',
-                                          );
-                                        } else {
-                                          ToastService.showError(
-                                            context,
-                                            title: 'Sync Failed',
-                                            description:
-                                                'Could not reach the server. Try again.',
-                                          );
-                                        }
+                                  )
+                                : sync.lastSyncTime.value != null &&
+                                      sync.syncError.value.isEmpty
+                                ? Icon(
+                                    Icons.check_circle_rounded,
+                                    size: 18,
+                                    color: Colors.green.shade500,
+                                  )
+                                : Icon(
+                                    FeatherIcons.chevronRight,
+                                    size: 16,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurface
+                                        .withValues(alpha: 0.3),
+                                  ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            onTap:
+                                syncing ||
+                                    (sync.lastSyncTime.value != null &&
+                                        sync.syncError.value.isEmpty)
+                                ? null
+                                : () async {
+                                    await sync.syncToCloud();
+                                    if (context.mounted) {
+                                      if (sync.syncError.value.isEmpty) {
+                                        ToastService.showSuccess(
+                                          context,
+                                          title: 'Synced',
+                                          description:
+                                              'Your notes are up to date.',
+                                        );
+                                      } else {
+                                        ToastService.showError(
+                                          context,
+                                          title: 'Sync Failed',
+                                          description:
+                                              'Could not reach the server. Try again.',
+                                        );
                                       }
-                                    },
-                            );
-                          }),
+                                    }
+                                  },
+                          );
+                        }),
                         _SettingsRow(
                           icon: FeatherIcons.externalLink,
                           title: 'Manage Fikr Cloud',
@@ -217,27 +220,36 @@ class MobileSettings extends StatelessWidget {
                   const SizedBox(height: 28),
 
                   // ── AI Service (Free & Plus only — Pro users have managed AI) ──
-                  if (!isLoggedIn ||
-                      Get.find<SubscriptionController>().needsOwnKeys) ...[
-                    _SectionHeader(title: 'AI Service'),
-                    _SettingsGroup(
+                  Obx(() {
+                    final sub = Get.find<SubscriptionController>();
+                    final user = FirebaseService().currentUser.value;
+                    final isAnon = user?.isAnonymous ?? true;
+                    final loggedIn = user != null && !isAnon;
+                    if (loggedIn && !sub.needsOwnKeys) return const SizedBox.shrink();
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Obx(() {
-                          final provider =
-                              controller.config.value.activeProvider;
-                          return _SettingsRow(
-                            icon: FeatherIcons.cpu,
-                            title: 'AI Provider',
-                            value: provider?.name ?? 'Not set',
-                            onTap: () => Get.to(
-                              () => ProviderDetailScreen(provider: provider),
-                            ),
-                          );
-                        }),
+                        _SectionHeader(title: 'AI Service'),
+                        _SettingsGroup(
+                          children: [
+                            Obx(() {
+                              final provider =
+                                  controller.config.value.activeProvider;
+                              return _SettingsRow(
+                                icon: FeatherIcons.cpu,
+                                title: 'AI Provider',
+                                value: provider?.name ?? 'Not set',
+                                onTap: () => Get.to(
+                                  () => ProviderDetailScreen(provider: provider),
+                                ),
+                              );
+                            }),
+                          ],
+                        ),
+                        const SizedBox(height: 28),
                       ],
-                    ),
-                    const SizedBox(height: 28),
-                  ],
+                    );
+                  }),
 
                   // ── Preferences ──
                   _SectionHeader(title: 'Preferences'),

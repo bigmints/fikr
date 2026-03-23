@@ -14,6 +14,7 @@ import 'screens/onboarding_screen.dart';
 import 'services/firebase_service.dart';
 import 'services/storage_service.dart';
 import 'services/openai_service.dart';
+import 'services/audio_sync_service.dart';
 import 'services/widget_service.dart';
 
 @pragma('vm:entry-point')
@@ -62,6 +63,7 @@ Future<void> main() async {
   // Inject Dependencies
   Get.put(StorageService());
   Get.put(LLMService());
+  Get.put(AudioSyncService());
 
   final appController = Get.put(AppController());
   Get.put(ThemeController());

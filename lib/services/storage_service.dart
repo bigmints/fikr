@@ -141,7 +141,7 @@ class StorageService extends GetxService {
       multiBucket: data['multiBucket'] as bool? ?? true,
       autoStopSilence: data['autoStopSilence'] as bool? ?? true,
       silenceSeconds: data['silenceSeconds'] as int? ?? 5,
-      buckets: (data['buckets'] as List<dynamic>? ?? []).cast<String>(),
+      buckets: _safeStringList(data['buckets']),
       themeMode: 'system',
     );
 
@@ -236,6 +236,15 @@ class StorageService extends GetxService {
       await _audioDir.delete(recursive: true);
     }
     await _audioDir.create(recursive: true);
+  }
+
+  static List<String> _safeStringList(dynamic value) {
+    if (value == null) return [];
+    if (value is List) return value.map((e) => e.toString()).toList();
+    if (value is String && value.isNotEmpty) {
+      return value.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+    }
+    return [];
   }
 
   Map<String, dynamic> _decodeJson(String raw) {

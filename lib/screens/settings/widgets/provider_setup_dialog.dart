@@ -41,8 +41,6 @@ class _ProviderSetupDialogState extends State<ProviderSetupDialog> {
         return 'sk-...';
       case LLMProviderType.google:
         return 'AIza...';
-      case LLMProviderType.openrouter:
-        return 'sk-or-...';
     }
   }
 
@@ -52,8 +50,6 @@ class _ProviderSetupDialogState extends State<ProviderSetupDialog> {
         return 'https://platform.openai.com/api-keys';
       case LLMProviderType.google:
         return 'https://aistudio.google.com/app/apikey';
-      case LLMProviderType.openrouter:
-        return 'https://openrouter.ai/keys';
     }
   }
 
@@ -63,8 +59,6 @@ class _ProviderSetupDialogState extends State<ProviderSetupDialog> {
         return 'ChatGPT & Whisper';
       case LLMProviderType.google:
         return 'Recommended · Free to start';
-      case LLMProviderType.openrouter:
-        return 'Use many different AI models';
     }
   }
 
@@ -74,8 +68,6 @@ class _ProviderSetupDialogState extends State<ProviderSetupDialog> {
         return FeatherIcons.cpu;
       case LLMProviderType.google:
         return Icons.g_mobiledata;
-      case LLMProviderType.openrouter:
-        return FeatherIcons.navigation;
     }
   }
 
@@ -129,10 +121,9 @@ class _ProviderSetupDialogState extends State<ProviderSetupDialog> {
         await controller.storage.setAIDataConsent(true);
       }
 
+      // Models come from Remote Config — no need to save them locally
       final newConfig = currentConfig.copyWith(
         activeProvider: provider,
-        analysisModel: _selectedType.defaultAnalysisModel,
-        transcriptionModel: _selectedType.defaultTranscriptionModel,
       );
 
       // Save Key first, then Config (so refreshCanRecord reads the persisted key)

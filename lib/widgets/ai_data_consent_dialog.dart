@@ -174,11 +174,6 @@ class AIDataConsentDialog extends StatelessWidget {
                             label: 'Google AI',
                             url: 'https://policies.google.com/privacy',
                           ),
-                          _buildLink(
-                            context,
-                            label: 'OpenRouter',
-                            url: 'https://openrouter.ai/privacy',
-                          ),
                         ],
                       ),
                     ],
@@ -327,11 +322,6 @@ class AIDataConsentDialog extends StatelessWidget {
                       context,
                       label: 'Google AI',
                       url: 'https://policies.google.com/privacy',
-                    ),
-                    _buildLink(
-                      context,
-                      label: 'OpenRouter',
-                      url: 'https://openrouter.ai/privacy',
                     ),
                   ],
                 ),

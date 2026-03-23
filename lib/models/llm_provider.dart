@@ -1,4 +1,4 @@
-enum LLMProviderType { openai, google, openrouter }
+enum LLMProviderType { openai, google }
 
 extension LLMProviderTypeExtension on LLMProviderType {
   String get displayName {
@@ -7,8 +7,6 @@ extension LLMProviderTypeExtension on LLMProviderType {
         return 'OpenAI';
       case LLMProviderType.google:
         return 'Google Gemini';
-      case LLMProviderType.openrouter:
-        return 'OpenRouter';
     }
   }
 
@@ -18,30 +16,26 @@ extension LLMProviderTypeExtension on LLMProviderType {
         return 'https://api.openai.com/v1';
       case LLMProviderType.google:
         return 'https://generativelanguage.googleapis.com/v1beta';
-      case LLMProviderType.openrouter:
-        return 'https://openrouter.ai/api/v1';
     }
   }
 
-  String get defaultAnalysisModel {
+  /// Hardcoded fallback — only used if Remote Config is unreachable.
+  String get fallbackAnalysisModel {
     switch (this) {
       case LLMProviderType.openai:
         return 'gpt-4o';
       case LLMProviderType.google:
         return 'gemini-2.0-flash';
-      case LLMProviderType.openrouter:
-        return 'google/gemini-2.0-flash-001';
     }
   }
 
-  String get defaultTranscriptionModel {
+  /// Hardcoded fallback — only used if Remote Config is unreachable.
+  String get fallbackTranscriptionModel {
     switch (this) {
       case LLMProviderType.openai:
         return 'whisper-1';
       case LLMProviderType.google:
         return 'gemini-2.0-flash';
-      case LLMProviderType.openrouter:
-        return 'google/gemini-2.0-flash-001';
     }
   }
 }
@@ -88,14 +82,17 @@ class LLMProvider {
   }
 
   factory LLMProvider.fromJson(Map<String, dynamic> json) {
+    final typeStr = json['type'] as String;
+    // Map legacy 'openrouter' entries to 'google' (graceful migration)
+    final type = LLMProviderType.values.firstWhere(
+      (e) => e.name == typeStr,
+      orElse: () => LLMProviderType.google,
+    );
     return LLMProvider(
       id: json['id'] as String,
       name: json['name'] as String,
-      type: LLMProviderType.values.firstWhere(
-        (e) => e.name == json['type'],
-        orElse: () => LLMProviderType.openai,
-      ),
-      baseUrl: json['baseUrl'] as String,
+      type: type,
+      baseUrl: json['baseUrl'] as String? ?? type.defaultBaseUrl,
       isActive: json['isActive'] as bool? ?? true,
     );
   }

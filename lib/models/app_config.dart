@@ -16,7 +16,7 @@ class AppConfig {
     required this.themeMode,
   });
 
-  /// The single active LLM provider (OpenAI, Google Gemini, OpenRouter).
+  /// The single active LLM provider (OpenAI or Google Gemini).
   final LLMProvider? activeProvider;
 
   /// Model used for analysis (chat completions / generateContent).
@@ -111,19 +111,28 @@ class AppConfig {
       multiBucket: json['multiBucket'] as bool? ?? true,
       autoStopSilence: json['autoStopSilence'] as bool? ?? true,
       silenceSeconds: json['silenceSeconds'] as int? ?? 5,
-      buckets: (json['buckets'] as List<dynamic>? ?? _defaultBuckets)
-          .cast<String>(),
+      buckets: _safeStringList(json['buckets'], fallback: _defaultBuckets),
       themeMode: json['themeMode'] as String? ?? 'system',
     );
   }
 
+  static List<String> _safeStringList(dynamic value, {List<String> fallback = const []}) {
+    if (value == null) return fallback;
+    if (value is List) return value.map((e) => e.toString()).toList();
+    if (value is String && value.isNotEmpty) {
+      return value.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+    }
+    return fallback;
+  }
+
   static Color getBucketColor(String bucket) {
+    // Muted, accessible palette — works well as text and tinted backgrounds.
     final Map<String, Color> maps = {
-      'Personal Life': const Color.fromARGB(255, 255, 0, 8),
-      'Health & Fitness': const Color.fromARGB(255, 0, 255, 13),
-      'Work Life': const Color.fromARGB(255, 1, 196, 255),
-      'Finance': const Color.fromARGB(255, 255, 204, 0),
-      'General': const Color.fromARGB(255, 0, 102, 255),
+      'Personal Life': const Color(0xFFD946A8),   // soft rose-pink
+      'Health & Fitness': const Color(0xFF0EA371), // muted emerald
+      'Work Life': const Color(0xFF3B82F6),        // calm blue
+      'Finance': const Color(0xFFD97706),          // warm amber
+      'General': const Color(0xFF6366F1),          // soft indigo
     };
 
     if (maps.containsKey(bucket)) return maps[bucket]!;

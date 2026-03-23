@@ -5,12 +5,14 @@ import '../../models/insights_models.dart';
 import '../../utils/app_typography.dart';
 
 /// A reusable task tile used across Insights, Tasks screen, etc.
-/// Supports both active and completed states.
+/// Supports both active and completed states with swipe-to-delete.
 class TaskTile extends StatelessWidget {
   const TaskTile({
     super.key,
     required this.todo,
     required this.onToggle,
+    this.onDelete,
+    this.onTap,
     this.showSource = true,
     this.showDate = false,
     this.compact = false,
@@ -18,6 +20,8 @@ class TaskTile extends StatelessWidget {
 
   final TodoItem todo;
   final VoidCallback onToggle;
+  final VoidCallback? onDelete;
+  final VoidCallback? onTap;
   final bool showSource;
   final bool showDate;
   final bool compact;
@@ -27,8 +31,8 @@ class TaskTile extends StatelessWidget {
     final theme = Theme.of(context);
     final done = todo.isCompleted;
 
-    return InkWell(
-      onTap: onToggle,
+    final tile = InkWell(
+      onTap: onTap ?? onToggle,
       borderRadius: BorderRadius.circular(12),
       child: Padding(
         padding: EdgeInsets.symmetric(
@@ -38,21 +42,24 @@ class TaskTile extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Checkbox circle
-            Container(
-              width: 24,
-              height: 24,
-              margin: const EdgeInsets.only(right: 14, top: 2),
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: done ? AppPalette.taskAccent : null,
-                border: done
-                    ? null
-                    : Border.all(color: AppPalette.taskAccent, width: 2),
+            // Checkbox circle — always toggles completion
+            GestureDetector(
+              onTap: onToggle,
+              child: Container(
+                width: 24,
+                height: 24,
+                margin: const EdgeInsets.only(right: 14, top: 2),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: done ? AppPalette.taskAccent : null,
+                  border: done
+                      ? null
+                      : Border.all(color: AppPalette.taskAccent, width: 2),
+                ),
+                child: done
+                    ? const Icon(Icons.check, size: 16, color: Colors.white)
+                    : null,
               ),
-              child: done
-                  ? const Icon(Icons.check, size: 16, color: Colors.white)
-                  : null,
             ),
 
             // Content
@@ -133,6 +140,30 @@ class TaskTile extends StatelessWidget {
         ),
       ),
     );
+
+    // Wrap with swipe-to-delete if onDelete is provided
+    if (onDelete != null) {
+      return Dismissible(
+        key: ValueKey(todo.id),
+        direction: DismissDirection.endToStart,
+        onDismissed: (_) => onDelete!(),
+        background: Container(
+          alignment: Alignment.centerRight,
+          padding: const EdgeInsets.only(right: 20),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.error.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(
+            Icons.delete_outline_rounded,
+            color: theme.colorScheme.error,
+          ),
+        ),
+        child: tile,
+      );
+    }
+
+    return tile;
   }
 
   static String _formatDate(DateTime date) {

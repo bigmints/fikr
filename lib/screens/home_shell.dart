@@ -10,6 +10,7 @@ import 'package:fikr/screens/tasks/tasks_screen.dart';
 import 'package:fikr/screens/shells/desktop_shell.dart';
 import 'package:fikr/screens/shells/mobile_shell.dart';
 import 'package:fikr/screens/insights/widgets/insight_dialogs.dart';
+import 'package:fikr/screens/insights/insights_history_screen.dart';
 
 import '../utils/layout.dart';
 
@@ -218,9 +219,9 @@ class HomeShell extends StatelessWidget {
         ),
         const SizedBox(width: 8),
         IconButton(
-          onPressed: () => showInsightsHistoryDialog(context, controller),
-          icon: const Icon(FeatherIcons.clock, size: 18),
-          tooltip: 'History',
+          onPressed: () => InsightsHistoryScreen.show(context),
+          icon: const Icon(FeatherIcons.bookOpen, size: 18),
+          tooltip: 'Journal',
         ),
         const SizedBox(width: 8),
         Obx(

@@ -22,6 +22,7 @@ import '../services/toast_service.dart';
 import '../services/sync_service.dart';
 import '../services/firebase_service.dart';
 import '../services/fikr_api_service.dart';
+import '../services/audio_sync_service.dart';
 import '../services/widget_service.dart';
 import '../widgets/ai_data_consent_dialog.dart';
 import 'theme_controller.dart';
@@ -192,6 +193,13 @@ class AppController extends GetxController with WidgetsBindingObserver {
   }
 
   Future<void> refreshCanRecord() async {
+    // Pro users always have managed AI — no local provider needed.
+    if (subscription.isPro) {
+      debugPrint('CanRecord: Pro user — managed AI enabled.');
+      canRecord.value = true;
+      return;
+    }
+
     final provider = config.value.activeProvider;
 
     debugPrint(
@@ -211,11 +219,6 @@ class AppController extends GetxController with WidgetsBindingObserver {
       debugPrint(
         'CanRecord: apiKey=${apiKey != null && apiKey.isNotEmpty ? 'present' : 'MISSING'}',
       );
-
-      if (subscription.isPro) {
-        canRecord.value = true;
-        return;
-      }
 
       canRecord.value = apiKey != null && apiKey.isNotEmpty;
       debugPrint('CanRecord: result=${canRecord.value}');
@@ -250,8 +253,6 @@ class AppController extends GetxController with WidgetsBindingObserver {
     errorMessage.value = '';
 
     final provider = config.value.activeProvider;
-    final analysisModel = config.value.analysisModel;
-    final transcriptionModel = config.value.transcriptionModel;
 
     if (provider == null) {
       errorMessage.value = 'Fikr isn\'t set up yet. Go to Settings.';
@@ -266,6 +267,9 @@ class AppController extends GetxController with WidgetsBindingObserver {
       await _processWithManagedAI(tempAudioFile);
       return;
     }
+
+    // Resolve models from Remote Config (not local config)
+    final byokModels = FirebaseService().getByokModels(provider.type);
 
     final apiKey = await storage.getApiKey(provider.id);
     if (apiKey == null || apiKey.isEmpty) {
@@ -297,7 +301,7 @@ class AppController extends GetxController with WidgetsBindingObserver {
       final transcript = await openAI.transcribeAudio(
         audioFile: File(audioPath),
         provider: provider,
-        model: transcriptionModel,
+        model: byokModels.transcription,
         apiKey: apiKey,
         language: config.value.language,
       );
@@ -325,7 +329,7 @@ class AppController extends GetxController with WidgetsBindingObserver {
       final analysis = await openAI.analyzeTranscript(
         transcript: transcript,
         provider: provider,
-        model: analysisModel,
+        model: byokModels.analysis,
         apiKey: apiKey,
         buckets: config.value.buckets,
         multiBucket: config.value.multiBucket,
@@ -519,6 +523,33 @@ class AppController extends GetxController with WidgetsBindingObserver {
         note.title.isNotEmpty ? note.title : note.snippet,
       ),
     );
+
+    // ── Background audio upload for Plus/Pro ──────────────────────────
+    unawaited(_uploadAudioInBackground(note));
+  }
+
+  /// Uploads audio to Firebase Storage in the background and updates the
+  /// note with the cloud URL. Fire-and-forget — failures are swallowed.
+  Future<void> _uploadAudioInBackground(Note note) async {
+    if (note.audioPath == null || note.audioPath!.isEmpty) return;
+    try {
+      final audioSync = Get.find<AudioSyncService>();
+      final url = await audioSync.uploadAudio(
+        noteId: note.id,
+        localPath: note.audioPath!,
+      );
+      if (url != null) {
+        final updated = note.copyWith(audioUrl: url, updatedAt: DateTime.now());
+        final idx = notes.indexWhere((n) => n.id == note.id);
+        if (idx != -1) {
+          notes[idx] = updated;
+          notes.refresh();
+          await saveNotes();
+        }
+      }
+    } catch (e) {
+      debugPrint('Background audio upload failed: $e');
+    }
   }
 
   /// Generates a short, meaningful title from the first few words of a transcript.
@@ -598,6 +629,13 @@ class AppController extends GetxController with WidgetsBindingObserver {
     // Delete from Firestore so it won't come back on sync
     if (subscription.canSync) {
       Get.find<SyncService>().deleteNoteFromCloud(id);
+      // Clean up cloud audio
+      if (existing?.audioUrl != null) {
+        Get.find<AudioSyncService>().deleteAudio(
+          noteId: id,
+          audioUrl: existing!.audioUrl,
+        );
+      }
     }
   }
 
@@ -612,10 +650,37 @@ class AppController extends GetxController with WidgetsBindingObserver {
   }
 
   Future<void> playAudio(Note note) async {
-    if (note.audioPath == null) return;
     try {
-      await _player.setFilePath(note.audioPath!);
-      await _player.play();
+      // 1. Try local file first
+      if (note.audioPath != null && note.audioPath!.isNotEmpty) {
+        final localFile = File(note.audioPath!);
+        if (await localFile.exists()) {
+          await _player.setFilePath(note.audioPath!);
+          await _player.play();
+          return;
+        }
+      }
+
+      // 2. Try downloading from cloud URL
+      if (note.audioUrl != null && note.audioUrl!.isNotEmpty) {
+        final audioSync = Get.find<AudioSyncService>();
+        final localPath = await audioSync.downloadAudio(
+          noteId: note.id,
+          audioUrl: note.audioUrl!,
+        );
+        if (localPath != null) {
+          // Update note with local path to avoid re-downloading
+          final updated = note.copyWith(audioPath: localPath);
+          await updateNote(updated);
+          await _player.setFilePath(localPath);
+          await _player.play();
+          return;
+        }
+
+        // 3. Stream directly from URL as last resort
+        await _player.setUrl(note.audioUrl!);
+        await _player.play();
+      }
     } catch (_) {}
   }
 
@@ -728,6 +793,36 @@ class AppController extends GetxController with WidgetsBindingObserver {
     await _saveTasks();
   }
 
+  Future<void> deleteTask(String id) async {
+    todoItems.removeWhere((item) => item.id == id);
+    await _saveTasks();
+  }
+
+  Future<void> updateTaskTitle(String id, String newTitle) async {
+    todoItems.value = todoItems.map((item) {
+      if (item.id != id) return item;
+      return item.copyWith(title: newTitle);
+    }).toList();
+    await _saveTasks();
+  }
+
+  Future<void> deleteCompletedTasks() async {
+    todoItems.removeWhere((item) => item.isCompleted);
+    await _saveTasks();
+  }
+
+  Future<void> addTask(String title) async {
+    final task = TodoItem(
+      id: const Uuid().v4(),
+      title: title,
+      source: '',
+      status: 'todo',
+      createdAt: DateTime.now(),
+    );
+    todoItems.insert(0, task);
+    await _saveTasks();
+  }
+
   Future<void> dismissReminder(String id) async {
     reminders.value = reminders.map((item) {
       if (item.id != id) return item;
@@ -750,34 +845,31 @@ class AppController extends GetxController with WidgetsBindingObserver {
     insightsUpdateStatus.value = 'Collecting your notes...';
 
     try {
-      final provider = config.value.activeProvider;
-      if (provider == null) {
-        _notifyError('Fikr isn\'t set up yet.');
-        return;
-      }
-      final apiKey = await storage.getApiKey(provider.id);
-      if (apiKey == null || apiKey.isEmpty) {
-        _notifyError('Missing API key.');
-        return;
-      }
+      final isPro = subscription.isPro;
 
-      // Ensure user has consented to AI data sharing
-      if (!await _ensureAIConsent(provider)) return;
+      // ── BYOK users need a configured provider + API key ──
+      LLMProvider? provider;
+      String? apiKey;
+      if (!isPro) {
+        provider = config.value.activeProvider;
+        if (provider == null) {
+          _notifyError('Set up an AI provider in Settings → AI Service first.');
+          return;
+        }
+        apiKey = await storage.getApiKey(provider.id);
+        if (apiKey == null || apiKey.isEmpty) {
+          _notifyError('API key missing for ${provider.name}. Check Settings → AI Service.');
+          return;
+        }
+        // Ensure user has consented to AI data sharing
+        if (!await _ensureAIConsent(provider)) return;
+      }
 
       insightsUpdateStatus.value = 'Analyzing your notes...';
-      final activeBuckets = selectedInsightBuckets.toList();
-      final filtered = activeBuckets.isEmpty
-          ? notes.toList()
-          : notes.where((note) {
-              return note.topics.any((topic) => activeBuckets.contains(topic));
-            }).toList();
-      if (filtered.isEmpty) {
-        _notifyError('No notes in the selected buckets.');
-        return;
-      }
+      final allBuckets = config.value.buckets;
 
       // Filter out notes without meaningful content
-      final meaningful = filtered.where((note) {
+      final meaningful = notes.where((note) {
         final content = note.text.isNotEmpty ? note.text : note.transcript;
         return content.trim().length >= 10;
       }).toList();
@@ -800,14 +892,28 @@ class AppController extends GetxController with WidgetsBindingObserver {
 
       insightsUpdateStatus.value = 'Synthesizing themes...';
       final existingTitles = todoItems.map((t) => t.title).toList();
-      final generated = await openAI.generateInsights(
-        notes: payloadNotes,
-        provider: provider,
-        model: config.value.analysisModel,
-        apiKey: apiKey,
-        buckets: activeBuckets,
-        existingTaskTitles: existingTitles,
-      );
+
+      // ── Branch: Pro → fikr.one backend, BYOK → user's LLM provider ──
+      final GeneratedInsights generated;
+      if (isPro) {
+        final fikrApi = FikrApiService();
+        final rawJson = await fikrApi.generateInsights(
+          notes: payloadNotes,
+          buckets: allBuckets,
+          existingTaskTitles: existingTitles,
+        );
+        generated = GeneratedInsights.fromJson(rawJson);
+      } else {
+        final byokModels = FirebaseService().getByokModels(provider!.type);
+        generated = await openAI.generateInsights(
+          notes: payloadNotes,
+          provider: provider,
+          model: byokModels.analysis,
+          apiKey: apiKey!,
+          buckets: allBuckets,
+          existingTaskTitles: existingTitles,
+        );
+      }
 
       insightsUpdateStatus.value = 'Generating insights...';
       generatedInsights.value = generated;
@@ -833,17 +939,19 @@ class AppController extends GetxController with WidgetsBindingObserver {
       }
 
       insightsUpdateStatus.value = 'Saving this edition...';
-      final highlights = generated.highlights
-          .take(3)
-          .map(
-            (item) => InsightHighlight(
-              title: item.title,
-              detail: item.detail,
-              bucket: item.bucket,
-              icon: item.icon,
-            ),
-          )
-          .toList();
+      // Keep only 1 highlight per bucket (first one wins).
+      final seenBuckets = <String>{};
+      final highlights = <InsightHighlight>[];
+      for (final item in generated.highlights) {
+        if (seenBuckets.contains(item.bucket)) continue;
+        seenBuckets.add(item.bucket);
+        highlights.add(InsightHighlight(
+          title: item.title,
+          detail: item.detail,
+          bucket: item.bucket,
+          icon: item.icon,
+        ));
+      }
       final edition = InsightEdition(
         id: const Uuid().v4(),
         createdAt: DateTime.now(),
@@ -851,7 +959,7 @@ class AppController extends GetxController with WidgetsBindingObserver {
             ? generated.summary
             : 'No summary available yet.',
         highlights: highlights,
-        buckets: activeBuckets,
+        buckets: allBuckets,
       );
       final snapshot = List<InsightEdition>.from(insightEditions);
       insightEditions.insert(0, edition);

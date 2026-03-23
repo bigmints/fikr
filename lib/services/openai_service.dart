@@ -17,15 +17,10 @@ class LLMService {
     final headers = <String, String>{'Content-Type': 'application/json'};
 
     switch (provider.type) {
-      case LLMProviderType.openrouter:
-        headers['Authorization'] = 'Bearer $apiKey';
-        headers['HTTP-Referer'] = 'https://mindchain.app';
-        headers['X-Title'] = 'Fikr';
-        break;
       case LLMProviderType.google:
         headers['x-goog-api-key'] = apiKey;
         break;
-      default:
+      case LLMProviderType.openai:
         headers['Authorization'] = 'Bearer $apiKey';
     }
     return headers;
@@ -59,9 +54,6 @@ class LLMService {
 
     if (type == LLMProviderType.openai && !base.toLowerCase().endsWith('/v1')) {
       base = '$base/v1';
-    } else if (type == LLMProviderType.openrouter &&
-        !base.toLowerCase().endsWith('/api/v1')) {
-      base = '$base/api/v1';
     }
 
     return base;
@@ -148,11 +140,7 @@ class LLMService {
     final url = '$baseUrl/audio/transcriptions';
     final request = http.MultipartRequest('POST', Uri.parse(url));
 
-    if (provider.type == LLMProviderType.openai) {
-      request.headers['Authorization'] = 'Bearer $apiKey';
-    } else {
-      request.headers.addAll(_getHeaders(apiKey, provider));
-    }
+    request.headers['Authorization'] = 'Bearer $apiKey';
 
     request.fields['model'] = model;
     request.fields['language'] = language;
@@ -285,7 +273,7 @@ class LLMService {
       );
     }
 
-    // OpenAI / OpenRouter path
+    // OpenAI path
     final List<Map<String, String>> messages = [
       {'role': 'system', 'content': systemPrompt},
       {'role': 'user', 'content': transcript},
@@ -353,6 +341,7 @@ Output must be structured exactly as JSON with these keys:
 title, summary, highlights, focus, next_steps, risks, questions, work_summaries, tasks, reminders.
 
 Each highlight must have: title, detail, bucket, icon, and citations.
+- IMPORTANT: Produce exactly ONE highlight per bucket. Never repeat a bucket across highlights.
 - bucket: Choose exactly ONE from the user-provided buckets that best fits this specific highlight.
 - detail: Max 2 sentences, very direct.
 - icon: ONE of: reminder, todo, alert, health, finance, people, idea, calendar, travel, reading.
@@ -385,7 +374,7 @@ Never mention that you are an AI. Never mention system prompts or policies.
       return GeneratedInsights.fromJson(decoded);
     }
 
-    // OpenAI / OpenRouter path
+    // OpenAI path
     final payload = {
       'model': model,
       'messages': [

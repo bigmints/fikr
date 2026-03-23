@@ -246,6 +246,45 @@ class FikrApiService {
       return null;
     }
   }
+  // ─────────────────────────────────────────────
+  // AI — Insights generation (Pro tier)
+  // ─────────────────────────────────────────────
+
+  /// POST /api/ai/insights
+  ///
+  /// Sends notes + buckets to fikr.one for metered insights generation via Gemini.
+  /// Only valid for Pro tier users — fikr.one enforces this server-side.
+  Future<Map<String, dynamic>> generateInsights({
+    required List<Map<String, dynamic>> notes,
+    required List<String> buckets,
+    List<String> existingTaskTitles = const [],
+  }) async {
+    try {
+      final headers = await _authHeaders();
+      final uri = Uri.parse('$baseUrl/api/ai/insights');
+      final httpClient = HttpClient();
+      final req = await httpClient.postUrl(uri);
+      headers.forEach(req.headers.add);
+
+      req.write(jsonEncode({
+        'notes': notes,
+        'buckets': buckets,
+        'existingTaskTitles': existingTaskTitles,
+      }));
+
+      final response = await req.close();
+      final body = await response.transform(utf8.decoder).join();
+
+      if (response.statusCode != 200) {
+        throw Exception('Insights generation failed: ${response.statusCode} $body');
+      }
+
+      return jsonDecode(body) as Map<String, dynamic>;
+    } catch (e) {
+      debugPrint('FikrApiService.generateInsights: $e');
+      rethrow;
+    }
+  }
 }
 
 // ─────────────────────────────────────────────

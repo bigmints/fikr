@@ -5,7 +5,7 @@ import 'insights/desktop_insights.dart';
 import 'insights/mobile_insights.dart';
 import 'insights/widgets/insight_components.dart';
 import 'insights/widgets/insight_sections.dart';
-import 'insights/widgets/topic_mind_map.dart';
+
 
 import '../utils/app_spacing.dart';
 import '../utils/app_typography.dart';
@@ -82,7 +82,6 @@ class InsightsScreen extends StatelessWidget {
             generatedInsights: generated,
             ideaNotes: ideaNotes,
             notes: controller.notes,
-            selectedBuckets: controller.selectedInsightBuckets,
             isDesktop: useWideLayout,
             bucketCounts: bucketCounts,
             onGenerateInsights: () => controller.captureInsightsEdition(),
@@ -144,7 +143,6 @@ class _InsightsMainContent extends StatelessWidget {
     required this.generatedInsights,
     required this.ideaNotes,
     required this.notes,
-    required this.selectedBuckets,
     required this.isDesktop,
     required this.bucketCounts,
     this.onGenerateInsights,
@@ -154,7 +152,6 @@ class _InsightsMainContent extends StatelessWidget {
   final GeneratedInsights? generatedInsights;
   final List<InsightIdeaNote> ideaNotes;
   final List<Note> notes;
-  final List<String> selectedBuckets;
   final bool isDesktop;
   final Map<String, int> bucketCounts;
   final VoidCallback? onGenerateInsights;
@@ -167,9 +164,6 @@ class _InsightsMainContent extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // 1. Mind Map (desktop only — mobile renders it as background)
-        if (isDesktop) SizedBox(height: 400, child: TopicMindMap(notes: notes)),
-
         // 2. Highlights (horizontal cards)
         TopIdeasSection(ideaNotes: ideaNotes),
         SizedBox(height: AppSpacing.md),

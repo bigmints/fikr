@@ -11,6 +11,7 @@ class Note {
   final String bucket;
   final List<String> topics;
   final String? audioPath;
+  final String? audioUrl;
   final bool archived;
   final bool isProcessing;
 
@@ -25,6 +26,7 @@ class Note {
     this.bucket = 'General',
     required this.topics,
     this.audioPath,
+    this.audioUrl,
     this.archived = false,
     this.isProcessing = false,
   });
@@ -44,6 +46,7 @@ class Note {
     String? bucket,
     List<String>? topics,
     String? audioPath,
+    String? audioUrl,
     bool? archived,
     bool? isProcessing,
   }) {
@@ -58,6 +61,7 @@ class Note {
       bucket: bucket ?? this.bucket,
       topics: topics ?? this.topics,
       audioPath: audioPath ?? this.audioPath,
+      audioUrl: audioUrl ?? this.audioUrl,
       archived: archived ?? this.archived,
       isProcessing: isProcessing ?? this.isProcessing,
     );
@@ -75,6 +79,7 @@ class Note {
       'bucket': bucket,
       'topics': topics,
       'audioPath': audioPath,
+      'audioUrl': audioUrl,
       'archived': archived,
       'isProcessing': isProcessing,
     };
@@ -94,11 +99,9 @@ class Note {
       transcript: json['transcript'] as String? ?? '',
       intent: json['intent'] as String? ?? '',
       bucket: json['bucket'] as String? ?? 'General',
-      topics: (json['topics'] as List<dynamic>? ?? [])
-          .where((t) => t != null)
-          .map((t) => t.toString())
-          .toList(),
+      topics: _parseStringList(json['topics']),
       audioPath: json['audioPath'] as String?,
+      audioUrl: json['audioUrl'] as String?,
       archived: json['archived'] as bool? ?? false,
       isProcessing: json['isProcessing'] as bool? ?? false,
     );
@@ -116,6 +119,19 @@ class Note {
     } catch (e) {
       return [];
     }
+  }
+
+  /// Safely parses a JSON value that should be a `List<String>` but may arrive
+  /// as a plain String (legacy Firestore data) or null.
+  static List<String> _parseStringList(dynamic value) {
+    if (value == null) return [];
+    if (value is List) {
+      return value.where((t) => t != null).map((t) => t.toString()).toList();
+    }
+    if (value is String && value.isNotEmpty) {
+      return value.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+    }
+    return [];
   }
 
   static String listToJson(List<Note> notes) {

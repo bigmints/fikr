@@ -5,7 +5,7 @@ import '../../controllers/app_controller.dart';
 import '../../controllers/theme_controller.dart';
 import '../../utils/app_spacing.dart';
 import 'reminders_screen.dart';
-import 'widgets/insight_dialogs.dart';
+import 'insights_history_screen.dart';
 import 'widgets/topic_mind_map.dart';
 
 class MobileInsights extends StatelessWidget {
@@ -105,12 +105,8 @@ class MobileInsights extends StatelessWidget {
                     ),
                   ),
                   _TopBarAction(
-                    icon: FeatherIcons.tag,
-                    onTap: () => showInsightsBucketDialog(context, controller),
-                  ),
-                  _TopBarAction(
-                    icon: FeatherIcons.clock,
-                    onTap: () => showInsightsHistoryDialog(context, controller),
+                    icon: FeatherIcons.bookOpen,
+                    onTap: () => InsightsHistoryScreen.show(context),
                   ),
                   Obx(
                     () => _TopBarAction(

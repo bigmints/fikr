@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../controllers/app_controller.dart';
 import '../../controllers/subscription_controller.dart';
 import '../../controllers/theme_controller.dart';
+import '../../models/subscription_tier.dart';
 import '../../services/firebase_service.dart';
 import '../../services/sync_service.dart';
 import '../../services/toast_service.dart';
@@ -40,25 +41,12 @@ class DesktopSettings extends StatelessWidget {
                 ),
                 child: Column(
                   children: [
-                    // ── Header ──
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        'Settings',
-                        style: theme.textTheme.headlineSmall,
-                      ),
-                    ),
-
-                    const SizedBox(height: 32),
-
                     // ── Fikr Cloud ──
                     Obx(() {
                       final user = FirebaseService().currentUser.value;
                       final isAnonymous = user?.isAnonymous ?? true;
                       final isLoggedIn = user != null && !isAnonymous;
-                      final sub = Get.find<SubscriptionController>();
 
-                      // Not signed in → show sign-in card
                       if (!isLoggedIn) {
                         return Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -69,153 +57,161 @@ class DesktopSettings extends StatelessWidget {
                         );
                       }
 
-                      // Signed in but free → account info + informational note
-                      if (sub.isFree) {
-                        return Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _SectionHeader(title: 'Fikr Cloud'),
-                            _SettingsGroup(
-                              children: [
-                                Row(
-                                  children: [
-                                    CircleAvatar(
-                                      backgroundColor:
-                                          theme.colorScheme.primaryContainer,
-                                      child: Icon(
-                                        FeatherIcons.user,
-                                        size: 16,
-                                        color: theme.colorScheme.primary,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 16),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            user.email ?? 'Signed In',
-                                            style: theme.textTheme.bodyMedium,
-                                          ),
-                                          Text(
-                                            'Local storage only',
-                                            style: theme.textTheme.bodySmall
-                                                ?.copyWith(
-                                                  color: theme
-                                                      .colorScheme
-                                                      .onSurface
-                                                      .withValues(alpha: 0.6),
-                                                ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    TextButton(
-                                      onPressed: () async {
-                                        await FirebaseService().signOut();
-                                        if (context.mounted) {
-                                          ToastService.showSuccess(
-                                            context,
-                                            title: 'Signed Out',
-                                            description:
-                                                'You have been signed out.',
-                                          );
-                                        }
-                                      },
-                                      style: TextButton.styleFrom(
-                                        foregroundColor:
-                                            theme.colorScheme.error,
-                                      ),
-                                      child: const Text('Sign Out'),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 12),
-                                const FikrCloudNote(),
-                              ],
-                            ),
-                          ],
-                        );
-                      }
-
-                      // Signed in with subscription → full sync UI
                       return Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           _SectionHeader(title: 'Fikr Cloud'),
                           _SettingsGroup(
                             children: [
-                              Row(
-                                children: [
-                                  CircleAvatar(
-                                    backgroundColor:
-                                        theme.colorScheme.primaryContainer,
-                                    child: Icon(
-                                      FeatherIcons.user,
-                                      size: 16,
-                                      color: theme.colorScheme.primary,
-                                    ),
+                              // Account row – email + plan badge
+                              Obx(() {
+                                final sync = Get.find<SyncService>();
+                                final sub = Get.find<SubscriptionController>();
+                                final String syncLabel;
+                                if (sync.isSyncing.value) {
+                                  syncLabel = 'Syncing\u2026';
+                                } else if (sync.syncError.value.isNotEmpty) {
+                                  syncLabel = 'Sync error';
+                                } else if (sync.lastSyncTime.value != null) {
+                                  syncLabel = 'Synced';
+                                } else {
+                                  syncLabel = sub.isFree
+                                      ? 'Local storage only'
+                                      : 'Cloud sync enabled';
+                                }
+                                return ListTile(
+                                  leading: Icon(
+                                    FeatherIcons.user,
+                                    size: 20,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurface
+                                        .withValues(alpha: 0.7),
                                   ),
-                                  const SizedBox(width: 16),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          user.email ?? 'Signed In',
-                                          style: theme.textTheme.bodyMedium,
+                                  title: Text(
+                                    user.email ?? 'Signed In',
+                                    style: Theme.of(context).textTheme.bodyMedium,
+                                  ),
+                                  subtitle: Text(
+                                    syncLabel,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodySmall
+                                        ?.copyWith(
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .onSurface
+                                              .withValues(alpha: 0.4),
                                         ),
-                                        Text(
-                                          'Cloud sync enabled',
-                                          style: theme.textTheme.bodySmall
-                                              ?.copyWith(
-                                                color: theme
-                                                    .colorScheme
-                                                    .onSurface
-                                                    .withValues(alpha: 0.6),
-                                              ),
+                                  ),
+                                  trailing: _PlanBadge(
+                                    tier: sub.currentTier.value,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                );
+                              }),
+                              // Sync row (Plus/Pro only)
+                              Obx(() {
+                                final sub = Get.find<SubscriptionController>();
+                                if (!sub.canSync) return const SizedBox.shrink();
+                                final sync = Get.find<SyncService>();
+                                final syncing = sync.isSyncing.value;
+                                return ListTile(
+                                  leading: Icon(
+                                    FeatherIcons.uploadCloud,
+                                    size: 20,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurface
+                                        .withValues(alpha: 0.7),
+                                  ),
+                                  title: Text(
+                                    syncing
+                                        ? 'Syncing\u2026'
+                                        : sync.lastSyncTime.value != null &&
+                                              sync.syncError.value.isEmpty
+                                        ? 'Everything synced'
+                                        : 'Sync Now',
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.bodyMedium,
+                                  ),
+                                  trailing: syncing
+                                      ? const SizedBox(
+                                          width: 18,
+                                          height: 18,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                          ),
+                                        )
+                                      : sync.lastSyncTime.value != null &&
+                                            sync.syncError.value.isEmpty
+                                      ? Icon(
+                                          Icons.check_circle_rounded,
+                                          size: 18,
+                                          color: Colors.green.shade500,
+                                        )
+                                      : Icon(
+                                          FeatherIcons.chevronRight,
+                                          size: 16,
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .onSurface
+                                              .withValues(alpha: 0.3),
                                         ),
-                                      ],
-                                    ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14),
                                   ),
-                                  OutlinedButton.icon(
-                                    onPressed: () =>
-                                        Get.find<SyncService>().syncToCloud(),
-                                    icon: const Icon(
-                                      FeatherIcons.uploadCloud,
-                                      size: 14,
-                                    ),
-                                    label: const Text('Sync Now'),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  TextButton(
-                                    onPressed: () async {
-                                      await FirebaseService().signOut();
-                                      if (context.mounted) {
-                                        ToastService.showSuccess(
-                                          context,
-                                          title: 'Signed Out',
-                                          description: 'Cloud sync disabled.',
-                                        );
-                                      }
-                                    },
-                                    style: TextButton.styleFrom(
-                                      foregroundColor: theme.colorScheme.error,
-                                    ),
-                                    child: const Text('Sign Out'),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  TextButton(
-                                    onPressed: () =>
-                                        _showDeleteAccountDialog(context),
-                                    style: TextButton.styleFrom(
-                                      foregroundColor: theme.colorScheme.error,
-                                    ),
-                                    child: const Text('Delete Account'),
-                                  ),
-                                ],
+                                  onTap: syncing ||
+                                          (sync.lastSyncTime.value != null &&
+                                              sync.syncError.value.isEmpty)
+                                      ? null
+                                      : () async {
+                                          await sync.syncToCloud();
+                                          if (context.mounted) {
+                                            if (sync.syncError.value.isEmpty) {
+                                              ToastService.showSuccess(
+                                                context,
+                                                title: 'Synced',
+                                                description:
+                                                    'Your notes are up to date.',
+                                              );
+                                            } else {
+                                              ToastService.showError(
+                                                context,
+                                                title: 'Sync Failed',
+                                                description:
+                                                    'Could not reach the server.',
+                                              );
+                                            }
+                                          }
+                                        },
+                                );
+                              }),
+                              _SettingsRow(
+                                icon: FeatherIcons.externalLink,
+                                title: 'Manage Fikr Cloud',
+                                onTap: () => launchUrl(
+                                  Uri.parse('https://www.fikr.one/dashboard'),
+                                  mode: LaunchMode.externalApplication,
+                                ),
+                              ),
+                              _SettingsRow(
+                                icon: FeatherIcons.logOut,
+                                title: 'Sign Out',
+                                isDestructive: true,
+                                onTap: () async {
+                                  await FirebaseService().signOut();
+                                  if (context.mounted) {
+                                    ToastService.showSuccess(
+                                      context,
+                                      title: 'Signed Out',
+                                      description: 'Cloud sync disabled.',
+                                    );
+                                  }
+                                },
                               ),
                             ],
                           ),
@@ -226,27 +222,36 @@ class DesktopSettings extends StatelessWidget {
                     const SizedBox(height: 28),
 
                     // ── AI Service (Free & Plus only — Pro users have managed AI) ──
-                    if (!isLoggedIn || Get.find<SubscriptionController>().needsOwnKeys) ...[
-
-                      const SizedBox(height: 36),
-                      _SectionHeader(title: 'AI Service'),
-                      _SettingsGroup(
+                    Obx(() {
+                      final sub = Get.find<SubscriptionController>();
+                      final user = FirebaseService().currentUser.value;
+                      final isAnon = user?.isAnonymous ?? true;
+                      final loggedIn = user != null && !isAnon;
+                      if (loggedIn && !sub.needsOwnKeys) return const SizedBox.shrink();
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Obx(() {
-                            final provider =
-                                controller.config.value.activeProvider;
-                            return _SettingsRow(
-                              icon: FeatherIcons.cpu,
-                              title: 'AI Provider',
-                              value: provider?.name ?? 'Not set',
-                              onTap: () => Get.to(
-                                () => ProviderDetailScreen(provider: provider),
-                              ),
-                            );
-                          }),
+                          const SizedBox(height: 36),
+                          _SectionHeader(title: 'AI Service'),
+                          _SettingsGroup(
+                            children: [
+                              Obx(() {
+                                final provider =
+                                    controller.config.value.activeProvider;
+                                return _SettingsRow(
+                                  icon: FeatherIcons.cpu,
+                                  title: 'AI Provider',
+                                  value: provider?.name ?? 'Not set',
+                                  onTap: () => Get.to(
+                                    () => ProviderDetailScreen(provider: provider),
+                                  ),
+                                );
+                              }),
+                            ],
+                          ),
                         ],
-                      ),
-                    ],
+                      );
+                    }),
 
                     const SizedBox(height: 28),
 
@@ -332,40 +337,6 @@ class DesktopSettings extends StatelessWidget {
                           ),
                       ],
                     ),
-
-                    // ── Logout button at the bottom ──
-                    if (isLoggedIn) ...[
-                      const SizedBox(height: 36),
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: () async {
-                            await FirebaseService().signOut();
-                            if (context.mounted) {
-                              ToastService.showSuccess(
-                                context,
-                                title: 'Signed Out',
-                                description: 'Cloud sync disabled.',
-                              );
-                            }
-                          },
-                          icon: const Icon(FeatherIcons.logOut, size: 16),
-                          label: const Text('Logout'),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: theme.colorScheme.error,
-                            side: BorderSide(
-                              color: theme.colorScheme.error.withValues(
-                                alpha: 0.3,
-                              ),
-                            ),
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
 
                     const SizedBox(height: 48),
                   ],
@@ -549,6 +520,57 @@ class _SettingsGroup extends StatelessWidget {
         border: Border.all(color: dividerColor),
       ),
       child: Column(children: items),
+    );
+  }
+}
+
+/// Pill badge showing the user's current subscription tier.
+class _PlanBadge extends StatelessWidget {
+  const _PlanBadge({required this.tier});
+  final SubscriptionTier tier;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    final (label, bg, fg) = switch (tier) {
+      SubscriptionTier.proPlus => (
+        'Fikr Cloud Pro+',
+        isDark ? const Color(0xFF3B1F6B) : const Color(0xFFEDE9FE),
+        isDark ? const Color(0xFFD8B4FE) : const Color(0xFF7C3AED),
+      ),
+      SubscriptionTier.pro => (
+        'Fikr Cloud Pro',
+        isDark ? const Color(0xFF3B1F6B) : const Color(0xFFEDE9FE),
+        isDark ? const Color(0xFFD8B4FE) : const Color(0xFF7C3AED),
+      ),
+      SubscriptionTier.plus => (
+        'Fikr Cloud Plus',
+        isDark ? const Color(0xFF1A2E4A) : const Color(0xFFDBEAFE),
+        isDark ? const Color(0xFF93C5FD) : const Color(0xFF1D4ED8),
+      ),
+      SubscriptionTier.free => (
+        'Fikr Cloud',
+        isDark ? const Color(0xFF1F2937) : const Color(0xFFF3F4F6),
+        isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280),
+      ),
+    };
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: fg,
+          letterSpacing: 0.3,
+        ),
+      ),
     );
   }
 }

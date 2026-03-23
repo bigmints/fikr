@@ -1,5 +1,26 @@
 import 'dart:convert';
 
+/// Safely converts a dynamic value to a `List<dynamic>`.
+/// Handles null, List, and String (returns empty list for String).
+List<dynamic> _safeList(dynamic value) {
+  if (value == null) return [];
+  if (value is List) return value;
+  return [];
+}
+
+/// Safely converts a dynamic value to a `List<String>`.
+/// Handles null, List, and comma-separated String.
+List<String> _safeStringList(dynamic value) {
+  if (value == null) return [];
+  if (value is List) {
+    return value.where((t) => t != null).map((t) => t.toString()).toList();
+  }
+  if (value is String && value.isNotEmpty) {
+    return value.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+  }
+  return [];
+}
+
 class InsightIdeaNote {
   final String title;
   final String snippet;
@@ -212,11 +233,7 @@ class InsightHighlight {
       detail: json['detail'] as String? ?? '',
       bucket: json['bucket'] as String? ?? 'General',
       icon: json['icon'] as String? ?? 'idea',
-      citations:
-          (json['citations'] as List<dynamic>?)
-              ?.map((e) => e.toString())
-              .toList() ??
-          const [],
+      citations: _safeStringList(json['citations']),
     );
   }
 }
@@ -247,7 +264,7 @@ class GeneratedInsights {
   });
 
   factory GeneratedInsights.fromJson(Map<String, dynamic> json) {
-    final highlights = (json['highlights'] as List<dynamic>? ?? [])
+    final highlights = _safeList(json['highlights'])
         .whereType<Map<String, dynamic>>()
         .map(InsightHighlight.fromJson)
         .toList();
@@ -255,25 +272,15 @@ class GeneratedInsights {
       title: json['title'] as String? ?? 'Insights',
       summary: json['summary'] as String? ?? '',
       highlights: highlights,
-      focus: (json['focus'] as List<dynamic>? ?? [])
-          .map((item) => item.toString())
-          .toList(),
-      nextSteps: (json['next_steps'] as List<dynamic>? ?? [])
-          .map((item) => item.toString())
-          .toList(),
-      risks: (json['risks'] as List<dynamic>? ?? [])
-          .map((item) => item.toString())
-          .toList(),
-      questions: (json['questions'] as List<dynamic>? ?? [])
-          .map((item) => item.toString())
-          .toList(),
-      workSummaries: (json['work_summaries'] as List<dynamic>? ?? [])
-          .map((item) => item.toString())
-          .toList(),
-      llmTasks: (json['tasks'] as List<dynamic>? ?? [])
+      focus: _safeStringList(json['focus']),
+      nextSteps: _safeStringList(json['next_steps']),
+      risks: _safeStringList(json['risks']),
+      questions: _safeStringList(json['questions']),
+      workSummaries: _safeStringList(json['work_summaries']),
+      llmTasks: _safeList(json['tasks'])
           .whereType<Map<String, dynamic>>()
           .toList(),
-      llmReminders: (json['reminders'] as List<dynamic>? ?? [])
+      llmReminders: _safeList(json['reminders'])
           .whereType<Map<String, dynamic>>()
           .toList(),
     );
@@ -306,7 +313,7 @@ class InsightEdition {
   }
 
   factory InsightEdition.fromJson(Map<String, dynamic> json) {
-    final highlightList = (json['highlights'] as List<dynamic>? ?? [])
+    final highlightList = _safeList(json['highlights'])
         .whereType<Map<String, dynamic>>()
         .map(InsightHighlight.fromJson)
         .toList();
@@ -317,9 +324,7 @@ class InsightEdition {
           : DateTime.now(),
       summary: json['summary'] as String? ?? '',
       highlights: highlightList,
-      buckets: (json['buckets'] as List<dynamic>? ?? [])
-          .map((item) => item.toString())
-          .toList(),
+      buckets: _safeStringList(json['buckets']),
     );
   }
 

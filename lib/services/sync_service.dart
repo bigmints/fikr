@@ -13,6 +13,7 @@ import '../services/toast_service.dart';
 import '../services/firebase_service.dart';
 import '../services/fikr_api_service.dart';
 import '../controllers/subscription_controller.dart';
+import 'audio_sync_service.dart';
 
 /// Key used to persist the last-synced user ID so we can detect
 /// same-account re-login vs account switches.
@@ -29,6 +30,10 @@ class SyncService extends GetxService {
   final Rx<DateTime?> lastSyncTime = Rx<DateTime?>(null);
   final RxString syncError = ''.obs;
 
+  /// When a login sync is requested while another is in progress, we
+  /// store the pending user so we can re-trigger after the current one.
+  User? _pendingLoginUser;
+
   @override
   void onInit() {
     super.onInit();
@@ -42,11 +47,14 @@ class SyncService extends GetxService {
       // Logout: do nothing — keep local data in place.
     });
 
-    // React to plan changes (re-push user record)
+    // React to plan changes — refresh UI immediately, then sync if eligible.
     final subController = Get.find<SubscriptionController>();
     ever(subController.currentTier, (tier) async {
       try {
         debugPrint('Sync: Plan changed → ${tier.name}');
+        // Immediately refresh the app controller so the UI reflects the new
+        // tier (canRecord, canSync, etc.) without requiring a restart.
+        await _refreshAppController();
         if (subController.canSync) {
           await _startSync();
         } else {
@@ -76,7 +84,9 @@ class SyncService extends GetxService {
   ///  • First-ever login           → push local notes to cloud
   Future<void> _handleLogin(User user) async {
     if (isSyncing.value) {
-      debugPrint('Sync: Already in progress, skipping.');
+      // Don't drop the request — queue it so we retry after the current sync.
+      debugPrint('Sync: Already in progress, queuing user ${user.uid}.');
+      _pendingLoginUser = user;
       return;
     }
     isSyncing.value = true;
@@ -122,6 +132,14 @@ class SyncService extends GetxService {
       syncError.value = e.toString();
     } finally {
       isSyncing.value = false;
+
+      // Process any queued login request that arrived while we were syncing.
+      final pending = _pendingLoginUser;
+      _pendingLoginUser = null;
+      if (pending != null) {
+        debugPrint('Sync: Processing queued login for ${pending.uid}.');
+        await _handleLogin(pending);
+      }
     }
   }
 
@@ -181,6 +199,9 @@ class SyncService extends GetxService {
     await _storage.saveTasks(mergedTasks);
     await _storage.saveReminders(mergedReminders);
 
+    // Download missing audio files in the background
+    _downloadMissingAudioForNotes(mergedNotes);
+
     // Push merged to cloud (includes API key push)
     await syncToCloud();
 
@@ -225,6 +246,9 @@ class SyncService extends GetxService {
     await _storage.saveTasks(cloudTasks);
     await _storage.saveReminders(cloudReminders);
 
+    // Download missing audio files in the background
+    _downloadMissingAudioForNotes(cloudNotes);
+
     // Pull API keys from fikr.one into local secure storage (Plus/Pro only)
     await _pullRemoteApiKeys();
 
@@ -252,8 +276,27 @@ class SyncService extends GetxService {
     try {
       final appController = Get.find<AppController>();
       await appController.reloadAllData();
+      // Also refresh canRecord so Pro/Plus UI updates immediately.
+      await appController.refreshCanRecord();
     } catch (_) {
       // AppController may not be registered yet during startup
+    }
+  }
+
+  // ── Audio download for synced notes ─────────────────────────────────
+
+  /// Downloads audio from Firebase Storage for notes that have a cloud
+  /// URL but no local file. Runs as fire-and-forget background work.
+  void _downloadMissingAudioForNotes(List<Note> notes) {
+    try {
+      final audioSync = Get.find<AudioSyncService>();
+      final jsonList = notes.map((n) => n.toJson()).toList();
+      // Fire and forget — don't block the sync flow
+      audioSync.downloadMissingAudio(jsonList).catchError((e) {
+        debugPrint('SyncService: Background audio download error: $e');
+      });
+    } catch (e) {
+      debugPrint('SyncService: Could not start audio download: $e');
     }
   }
 
@@ -497,14 +540,10 @@ class SyncService extends GetxService {
           type: providerType,
           baseUrl: providerType.defaultBaseUrl,
         );
+        // Models come from Remote Config now — no need to set them here.
+        // The app will read them dynamically from FirebaseService.getByokModels().
         final updatedConfig = config.copyWith(
           activeProvider: provider,
-          analysisModel: config.analysisModel.isEmpty
-              ? providerType.defaultAnalysisModel
-              : config.analysisModel,
-          transcriptionModel: config.transcriptionModel.isEmpty
-              ? providerType.defaultTranscriptionModel
-              : config.transcriptionModel,
         );
         await _storage.saveConfig(updatedConfig);
         debugPrint(

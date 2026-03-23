@@ -16,7 +16,16 @@ class AnalysisResult {
       cleanedText: json['cleanedText'] as String? ?? '',
       intent: json['intent'] as String? ?? '',
       bucket: json['bucket'] as String? ?? 'General',
-      topics: (json['topics'] as List<dynamic>? ?? []).cast<String>(),
+      topics: _safeStringList(json['topics']),
     );
+  }
+
+  static List<String> _safeStringList(dynamic value) {
+    if (value == null) return [];
+    if (value is List) return value.map((e) => e.toString()).toList();
+    if (value is String && value.isNotEmpty) {
+      return value.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+    }
+    return [];
   }
 }
