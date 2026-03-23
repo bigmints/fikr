@@ -12,6 +12,7 @@ class Note {
   final List<String> topics;
   final String? audioPath;
   final bool archived;
+  final bool isProcessing;
 
   Note({
     required this.id,
@@ -25,6 +26,7 @@ class Note {
     required this.topics,
     this.audioPath,
     this.archived = false,
+    this.isProcessing = false,
   });
 
   String get snippet => text.isNotEmpty
@@ -43,6 +45,7 @@ class Note {
     List<String>? topics,
     String? audioPath,
     bool? archived,
+    bool? isProcessing,
   }) {
     return Note(
       id: id ?? this.id,
@@ -56,6 +59,7 @@ class Note {
       topics: topics ?? this.topics,
       audioPath: audioPath ?? this.audioPath,
       archived: archived ?? this.archived,
+      isProcessing: isProcessing ?? this.isProcessing,
     );
   }
 
@@ -72,6 +76,7 @@ class Note {
       'topics': topics,
       'audioPath': audioPath,
       'archived': archived,
+      'isProcessing': isProcessing,
     };
   }
 
@@ -95,6 +100,7 @@ class Note {
           .toList(),
       audioPath: json['audioPath'] as String?,
       archived: json['archived'] as bool? ?? false,
+      isProcessing: json['isProcessing'] as bool? ?? false,
     );
   }
 

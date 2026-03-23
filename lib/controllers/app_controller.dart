@@ -75,6 +75,9 @@ class AppController extends GetxController with WidgetsBindingObserver {
   final RxString insightsUpdateStatus = ''.obs;
   final RxList<String> selectedInsightBuckets = <String>[].obs;
 
+  /// Usage stats for Pro tier users. Null when not Pro or not yet fetched.
+  final Rx<ProUsageStats?> proUsageStats = Rx<ProUsageStats?>(null);
+
   List<Note> get filteredNotes {
     var filtered = selectedBucket.value == 'All'
         ? notes.toList()
@@ -270,11 +273,26 @@ class AppController extends GetxController with WidgetsBindingObserver {
       return;
     }
 
-    loading.value = true;
     try {
       final id = const Uuid().v4();
       final timestamp = DateTime.now();
       final audioPath = await _persistAudio(tempAudioFile, id);
+
+      final dummyNote = Note(
+        id: id,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        title: 'Transcribing...',
+        text: 'Your voice note is being processed.',
+        transcript: '',
+        intent: '',
+        bucket: 'General',
+        topics: const [],
+        audioPath: audioPath,
+        isProcessing: true,
+      );
+      notes.insert(0, dummyNote);
+      notes.refresh();
 
       final transcript = await openAI.transcribeAudio(
         audioFile: File(audioPath),
@@ -285,6 +303,8 @@ class AppController extends GetxController with WidgetsBindingObserver {
       );
 
       if (transcript.trim().isEmpty) {
+        notes.removeWhere((n) => n.id == id);
+        notes.refresh();
         if (Get.context != null) {
           ToastService.showInfo(
             Get.context!,
@@ -293,6 +313,13 @@ class AppController extends GetxController with WidgetsBindingObserver {
           );
         }
         return;
+      }
+
+      final dummyAnalyze = dummyNote.copyWith(title: 'Analyzing...', text: 'Extracting insights from your note.');
+      final index = notes.indexWhere((n) => n.id == id);
+      if (index != -1) {
+        notes[index] = dummyAnalyze;
+        notes.refresh();
       }
 
       final analysis = await openAI.analyzeTranscript(
@@ -313,6 +340,12 @@ class AppController extends GetxController with WidgetsBindingObserver {
       );
     } catch (error) {
       debugPrint('Note processing error: $error');
+      // On failure, remove the dummy note so it doesn't stay stuck
+      if (notes.isNotEmpty && notes.first.isProcessing) {
+         notes.removeWhere((n) => n.isProcessing && n.title.contains('...'));
+         notes.refresh();
+      }
+      
       final errStr = error.toString();
       String userMessage;
       if (errStr.contains('401') || errStr.contains('403')) {
@@ -331,24 +364,65 @@ class AppController extends GetxController with WidgetsBindingObserver {
             'Note processing failed. Please check your provider settings.';
       }
       _notifyError(userMessage);
-    } finally {
-      loading.value = false;
+    }
+  }
+
+  Future<void> fetchUsageStats() async {
+    if (!subscription.hasManagedVertexAI) return;
+    try {
+      final stats = await FikrApiService().getUsageStats();
+      proUsageStats.value = stats;
+    } catch (e) {
+      debugPrint('AppController.fetchUsageStats: $e');
     }
   }
 
   Future<void> _processWithManagedAI(File tempAudioFile) async {
-    loading.value = true;
     try {
-      final id = const Uuid().v4();
+      final id        = const Uuid().v4();
       final timestamp = DateTime.now();
       final audioPath = await _persistAudio(tempAudioFile, id);
 
+      final dummyNote = Note(
+        id: id,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        title: 'Transcribing...',
+        text: 'Your voice note is being processed by Cloud AI.',
+        transcript: '',
+        intent: '',
+        bucket: 'General',
+        topics: const [],
+        audioPath: audioPath,
+        isProcessing: true,
+      );
+      notes.insert(0, dummyNote);
+      notes.refresh();
+
       final fikrApi = FikrApiService();
 
-      // 1. Transcribe via fikr.one metered endpoint (Gemini Flash, usage tracked)
-      final transcript = await fikrApi.transcribeAudio(File(audioPath));
+      // 1. Transcribe via fikr.one metered endpoint
+      final String transcript;
+      try {
+        transcript = await fikrApi.transcribeAudio(File(audioPath));
+      } catch (e) {
+        notes.removeWhere((n) => n.id == id);
+        notes.refresh();
+        final errStr = e.toString();
+        if (errStr.contains('429') || errStr.contains('limit')) {
+          _notifyError(
+            'Monthly transcription limit reached (500/month). '
+            'Resets on the 1st of next month.',
+          );
+        } else {
+          _notifyError('Transcription failed. Please try again.');
+        }
+        return;
+      }
 
       if (transcript.trim().isEmpty) {
+        notes.removeWhere((n) => n.id == id);
+        notes.refresh();
         if (Get.context != null) {
           ToastService.showInfo(
             Get.context!,
@@ -359,26 +433,47 @@ class AppController extends GetxController with WidgetsBindingObserver {
         return;
       }
 
-      // 2. Analyze via fikr.one metered endpoint (usage tracked)
-      final analysisData = await fikrApi.analyzeTranscript(
-        transcript: transcript,
-        buckets: config.value.buckets,
-      );
+      final dummyAnalyze = dummyNote.copyWith(title: 'Analyzing...', text: 'Extracting insights from your note.');
+      final index = notes.indexWhere((n) => n.id == id);
+      if (index != -1) {
+        notes[index] = dummyAnalyze;
+        notes.refresh();
+      }
+
+      // 2. Analyze via fikr.one metered endpoint
+      final Map<String, dynamic> analysisData;
+      try {
+        analysisData = await fikrApi.analyzeTranscript(
+          transcript: transcript,
+          buckets: config.value.buckets,
+        );
+      } catch (e) {
+        notes.removeWhere((n) => n.id == id);
+        notes.refresh();
+        final errStr = e.toString();
+        if (errStr.contains('429') || errStr.contains('limit')) {
+          _notifyError(
+            'Monthly analysis limit reached (500/month). '
+            'Resets on the 1st of next month.',
+          );
+        } else {
+          _notifyError('Analysis failed. Please try again.');
+        }
+        return;
+      }
 
       final analysis = AnalysisResult.fromJson(analysisData);
+      await _finalizeNoteCreation(id, timestamp, audioPath, transcript, analysis);
 
-      await _finalizeNoteCreation(
-        id,
-        timestamp,
-        audioPath,
-        transcript,
-        analysis,
-      );
+      // Refresh usage counters after a successful note creation
+      unawaited(fetchUsageStats());
     } catch (error) {
       debugPrint('Managed AI processing error: $error');
+      if (notes.isNotEmpty && notes.first.isProcessing) {
+         notes.removeWhere((n) => n.isProcessing && n.title.contains('...'));
+         notes.refresh();
+      }
       _notifyError('Note processing failed. Please try again.');
-    } finally {
-      loading.value = false;
     }
   }
 
@@ -407,8 +502,16 @@ class AppController extends GetxController with WidgetsBindingObserver {
       topics: analysis.topics,
       audioPath: audioPath,
       archived: false,
+      isProcessing: false,
     );
-    notes.insert(0, note);
+
+    final index = notes.indexWhere((n) => n.id == id);
+    if (index != -1) {
+      notes[index] = note;
+    } else {
+      notes.insert(0, note);
+    }
+    notes.refresh();
     await saveNotes();
     // Notify native widget of the latest note.
     unawaited(

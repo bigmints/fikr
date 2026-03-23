@@ -6,10 +6,12 @@ import 'package:get/get.dart';
 
 import '../models/note.dart';
 import '../models/insights_models.dart';
+import '../models/llm_provider.dart';
 import '../controllers/app_controller.dart';
 import '../services/storage_service.dart';
 import '../services/toast_service.dart';
 import '../services/firebase_service.dart';
+import '../services/fikr_api_service.dart';
 import '../controllers/subscription_controller.dart';
 
 /// Key used to persist the last-synced user ID so we can detect
@@ -179,8 +181,11 @@ class SyncService extends GetxService {
     await _storage.saveTasks(mergedTasks);
     await _storage.saveReminders(mergedReminders);
 
-    // Push merged to cloud
+    // Push merged to cloud (includes API key push)
     await syncToCloud();
+
+    // Also pull any remote keys we might be missing locally
+    await _pullRemoteApiKeys();
 
     debugPrint(
       'Sync: Merge complete. Notes: ${mergedNotes.length}, '
@@ -219,6 +224,9 @@ class SyncService extends GetxService {
     await _storage.saveInsightEditions(cloudInsights);
     await _storage.saveTasks(cloudTasks);
     await _storage.saveReminders(cloudReminders);
+
+    // Pull API keys from fikr.one into local secure storage (Plus/Pro only)
+    await _pullRemoteApiKeys();
 
     debugPrint(
       'Sync: Pulled cloud data. Notes: ${cloudNotes.length}, '
@@ -400,6 +408,9 @@ class SyncService extends GetxService {
 
       await batch.commit();
 
+      // Push API keys to fikr.one (Plus/Pro only — server enforces plan)
+      await _pushLocalApiKeys(config);
+
       // Persist this user ID as the last synced account
       await _prefs.write(key: _kLastSyncedUserKey, value: user.uid);
 
@@ -416,6 +427,96 @@ class SyncService extends GetxService {
           description: 'Could not backup data. Please try again.',
         );
       }
+    }
+  }
+
+  // ── API Key sync helpers ────────────────────────────────────────────
+
+  /// Reads all provider API keys from secure storage and pushes them to
+  /// fikr.one via [FikrApiService.pushApiKeys]. Fires-and-forgets errors
+  /// (a key sync failure must never block the main data sync).
+  Future<void> _pushLocalApiKeys(dynamic config) async {
+    try {
+      final loadedConfig = await _storage.loadConfig();
+      final provider = loadedConfig.activeProvider;
+      if (provider == null) return;
+
+      final apiKey = await _storage.getApiKey(provider.id);
+      if (apiKey == null || apiKey.isEmpty) return;
+
+      await FikrApiService().pushApiKeys([
+        {
+          'id': provider.id,
+          'name': provider.name,
+          'type': provider.type.name,
+          'apiKey': apiKey,
+        },
+      ]);
+    } catch (e) {
+      debugPrint('SyncService._pushLocalApiKeys: $e');
+    }
+  }
+
+  /// Pulls API keys from fikr.one and writes them into local secure storage.
+  /// If the local config has no active provider, it also restores the full
+  /// provider config (type, name, baseUrl) so the app is immediately usable.
+  Future<void> _pullRemoteApiKeys() async {
+    try {
+      final remoteKeys = await FikrApiService().pullApiKeys();
+      if (remoteKeys.isEmpty) {
+        debugPrint('SyncService._pullRemoteApiKeys: No remote keys found.');
+        return;
+      }
+
+      // Always save remote keys to secure storage.
+      // Remote is authoritative for keys set/updated via fikr.one web.
+      for (final entry in remoteKeys) {
+        final id = entry['id'] ?? '';
+        final key = entry['apiKey'] ?? '';
+        if (id.isNotEmpty && key.isNotEmpty) {
+          await _storage.saveApiKey(id, key);
+          debugPrint('SyncService._pullRemoteApiKeys: Stored key for provider $id');
+        }
+      }
+
+      // If no activeProvider is configured locally, reconstruct it from the
+      // first remote entry so the app can use AI immediately.
+      final config = await _storage.loadConfig();
+      if (config.activeProvider == null && remoteKeys.isNotEmpty) {
+        final first = remoteKeys.first;
+        final typeStr = first['type'] ?? 'openai';
+        final providerType = LLMProviderType.values.firstWhere(
+          (e) => e.name == typeStr,
+          orElse: () => LLMProviderType.openai,
+        );
+        final provider = LLMProvider(
+          id: first['id'] ?? '$typeStr-restored',
+          name: first['name']?.isNotEmpty == true
+              ? first['name']!
+              : providerType.displayName,
+          type: providerType,
+          baseUrl: providerType.defaultBaseUrl,
+        );
+        final updatedConfig = config.copyWith(
+          activeProvider: provider,
+          analysisModel: config.analysisModel.isEmpty
+              ? providerType.defaultAnalysisModel
+              : config.analysisModel,
+          transcriptionModel: config.transcriptionModel.isEmpty
+              ? providerType.defaultTranscriptionModel
+              : config.transcriptionModel,
+        );
+        await _storage.saveConfig(updatedConfig);
+        debugPrint(
+          'SyncService._pullRemoteApiKeys: Restored provider config '
+          '"${provider.name}" (${provider.type.name}).',
+        );
+
+        // Refresh the in-memory app state so the UI reflects the new provider
+        await _refreshAppController();
+      }
+    } catch (e) {
+      debugPrint('SyncService._pullRemoteApiKeys: $e');
     }
   }
 

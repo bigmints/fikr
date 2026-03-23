@@ -29,21 +29,36 @@ class NoteCard extends StatelessWidget {
     return Hero(
       tag: 'note-${note.id}',
       child: GestureDetector(
-        onTap: onTap,
+        onTap: note.isProcessing ? null : onTap,
         child: Container(
           decoration: AppPalette.cardDecoration(context),
           padding: const EdgeInsets.all(20),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                note.title.isNotEmpty ? note.title : 'Untitled Note',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: AppTypography.titleLarge.copyWith(
-                  color: theme.colorScheme.onSurface,
-                  fontWeight: FontWeight.w600,
-                ),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      note.title.isNotEmpty ? note.title : 'Untitled Note',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTypography.titleLarge.copyWith(
+                        color: theme.colorScheme.onSurface,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  if (note.isProcessing)
+                    const Padding(
+                      padding: EdgeInsets.only(left: 8.0),
+                      child: SizedBox(
+                        height: 14,
+                        width: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    ),
+                ],
               ),
               const SizedBox(height: 8),
               Text(

@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../controllers/app_controller.dart';
 import '../../controllers/subscription_controller.dart';
 import '../../controllers/theme_controller.dart';
+import '../../models/subscription_tier.dart';
 import '../../services/firebase_service.dart';
 import '../../services/sync_service.dart';
 import '../../services/toast_service.dart';
@@ -72,21 +73,42 @@ class MobileSettings extends StatelessWidget {
                         Obx(() {
                           final sync = Get.find<SyncService>();
                           final sub = Get.find<SubscriptionController>();
-                          final String label;
+                          final String syncLabel;
                           if (sync.isSyncing.value) {
-                            label = 'Syncing…';
+                            syncLabel = 'Syncing…';
                           } else if (sync.syncError.value.isNotEmpty) {
-                            label = 'Sync error';
+                            syncLabel = 'Sync error';
                           } else if (sync.lastSyncTime.value != null) {
-                            label = 'Synced';
+                            syncLabel = 'Synced';
                           } else {
-                            label = sub.currentTier.value.name[0].toUpperCase() +
-                                sub.currentTier.value.name.substring(1);
+                            syncLabel = 'Cloud sync enabled';
                           }
-                          return _SettingsRow(
-                            icon: FeatherIcons.user,
-                            title: user.email ?? 'Signed In',
-                            value: label,
+                          return ListTile(
+                            leading: Icon(
+                              FeatherIcons.user,
+                              size: 20,
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onSurface.withValues(alpha: 0.7),
+                            ),
+                            title: Text(
+                              user.email ?? 'Signed In',
+                              style: Theme.of(context).textTheme.bodyMedium,
+                            ),
+                            subtitle: Text(
+                              syncLabel,
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurface
+                                        .withValues(alpha: 0.4),
+                                  ),
+                            ),
+                            trailing: _PlanBadge(tier: sub.currentTier.value),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
                           );
                         }),
                         if (Get.find<SubscriptionController>().canSync)
@@ -97,18 +119,17 @@ class MobileSettings extends StatelessWidget {
                               leading: Icon(
                                 FeatherIcons.uploadCloud,
                                 size: 20,
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .onSurface
-                                    .withValues(alpha: 0.7),
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurface.withValues(alpha: 0.7),
                               ),
                               title: Text(
                                 syncing
                                     ? 'Syncing…'
                                     : sync.lastSyncTime.value != null &&
-                                            sync.syncError.value.isEmpty
-                                        ? 'Everything synced'
-                                        : 'Sync Now',
+                                          sync.syncError.value.isEmpty
+                                    ? 'Everything synced'
+                                    : 'Sync Now',
                                 style: Theme.of(context).textTheme.bodyMedium,
                               ),
                               trailing: syncing
@@ -117,30 +138,31 @@ class MobileSettings extends StatelessWidget {
                                       height: 18,
                                       child: CircularProgressIndicator(
                                         strokeWidth: 2,
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .primary,
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.primary,
                                       ),
                                     )
                                   : sync.lastSyncTime.value != null &&
-                                          sync.syncError.value.isEmpty
-                                      ? Icon(
-                                          Icons.check_circle_rounded,
-                                          size: 18,
-                                          color: Colors.green.shade500,
-                                        )
-                                      : Icon(
-                                          FeatherIcons.chevronRight,
-                                          size: 16,
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .onSurface
-                                              .withValues(alpha: 0.3),
-                                        ),
+                                        sync.syncError.value.isEmpty
+                                  ? Icon(
+                                      Icons.check_circle_rounded,
+                                      size: 18,
+                                      color: Colors.green.shade500,
+                                    )
+                                  : Icon(
+                                      FeatherIcons.chevronRight,
+                                      size: 16,
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onSurface
+                                          .withValues(alpha: 0.3),
+                                    ),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(14),
                               ),
-                              onTap: syncing ||
+                              onTap:
+                                  syncing ||
                                       (sync.lastSyncTime.value != null &&
                                           sync.syncError.value.isEmpty)
                                   ? null
@@ -167,6 +189,14 @@ class MobileSettings extends StatelessWidget {
                             );
                           }),
                         _SettingsRow(
+                          icon: FeatherIcons.externalLink,
+                          title: 'Manage Fikr Cloud',
+                          onTap: () => launchUrl(
+                            Uri.parse('https://www.fikr.one/dashboard'),
+                            mode: LaunchMode.externalApplication,
+                          ),
+                        ),
+                        _SettingsRow(
                           icon: FeatherIcons.logOut,
                           title: 'Sign Out',
                           isDestructive: true,
@@ -187,12 +217,14 @@ class MobileSettings extends StatelessWidget {
                   const SizedBox(height: 28),
 
                   // ── AI Service (Free & Plus only — Pro users have managed AI) ──
-                  if (!isLoggedIn || Get.find<SubscriptionController>().needsOwnKeys) ...[
+                  if (!isLoggedIn ||
+                      Get.find<SubscriptionController>().needsOwnKeys) ...[
                     _SectionHeader(title: 'AI Service'),
                     _SettingsGroup(
                       children: [
                         Obx(() {
-                          final provider = controller.config.value.activeProvider;
+                          final provider =
+                              controller.config.value.activeProvider;
                           return _SettingsRow(
                             icon: FeatherIcons.cpu,
                             title: 'AI Provider',
@@ -233,7 +265,6 @@ class MobileSettings extends StatelessWidget {
                   ),
 
                   const SizedBox(height: 28),
-
 
                   // ── Data ──
                   _SectionHeader(title: 'Data'),
@@ -536,6 +567,58 @@ class _SettingsRow extends StatelessWidget {
       ),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       onTap: onTap,
+    );
+  }
+}
+
+/// Pill badge showing the user's current subscription tier.
+/// Intentionally minimal — no pricing, no upgrade prompts (App Store safe).
+class _PlanBadge extends StatelessWidget {
+  const _PlanBadge({required this.tier});
+  final SubscriptionTier tier;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    final (label, bg, fg) = switch (tier) {
+      SubscriptionTier.proPlus => (
+        'Fikr Cloud Pro+',
+        isDark ? const Color(0xFF3B1F6B) : const Color(0xFFEDE9FE),
+        isDark ? const Color(0xFFD8B4FE) : const Color(0xFF7C3AED),
+      ),
+      SubscriptionTier.pro => (
+        'Fikr Cloud Pro',
+        isDark ? const Color(0xFF3B1F6B) : const Color(0xFFEDE9FE),
+        isDark ? const Color(0xFFD8B4FE) : const Color(0xFF7C3AED),
+      ),
+      SubscriptionTier.plus => (
+        'Fikr Cloud Plus',
+        isDark ? const Color(0xFF1A2E4A) : const Color(0xFFDBEAFE),
+        isDark ? const Color(0xFF93C5FD) : const Color(0xFF1D4ED8),
+      ),
+      SubscriptionTier.free => (
+        'Fikr Cloud',
+        isDark ? const Color(0xFF1F2937) : const Color(0xFFF3F4F6),
+        isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280),
+      ),
+    };
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: fg,
+          letterSpacing: 0.3,
+        ),
+      ),
     );
   }
 }

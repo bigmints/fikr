@@ -67,10 +67,10 @@ Future<void> main() async {
   Get.put(ThemeController());
   await appController.initialize();
 
-  // Show onboarding when there's no provider configured AND no notes
-  final hasProvider = appController.config.value.activeProvider != null;
-  final hasNotes = appController.notes.isNotEmpty;
-  final showOnboarding = !hasProvider && !hasNotes;
+  // Show onboarding only when the user hasn't completed it yet.
+  final onboardingDone =
+      await Get.find<StorageService>().isOnboardingComplete();
+  final showOnboarding = !onboardingDone;
 
   runApp(FikrApp(showOnboarding: showOnboarding));
 }

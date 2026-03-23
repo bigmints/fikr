@@ -36,6 +36,12 @@ service cloud.firestore {
         allow read:  if request.auth != null && request.auth.uid == userId;
         allow write: if false;  // Only Admin SDK (fikr.one) writes usage
       }
+
+      // Private data (e.g., synced API keys) — only the fikr.one backend
+      // (Admin SDK) can read or write this subcollection. No client access.
+      match /private/{doc} {
+        allow read, write: if false;
+      }
     }
   }
 }
