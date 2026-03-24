@@ -19,6 +19,7 @@ class NoteDetailController extends GetxController {
   final RxBool isEditing = false.obs;
   final RxBool isPlaying = false.obs;
   final RxBool isLoadingAudio = false.obs;
+  final RxString audioError = ''.obs;
   final Rx<Duration> duration = Duration.zero.obs;
   final Rx<Duration> position = Duration.zero.obs;
   final RxList<String> topics = <String>[].obs;
@@ -39,49 +40,48 @@ class NoteDetailController extends GetxController {
 
   Future<void> _initAudio() async {
     if (!hasAudio) return;
+    audioError.value = '';
 
     try {
-      // Strategy: try local file first, then download from cloud
+      await audioPlayer.stop();
+
       final localPath = note.audioPath;
       if (localPath != null && localPath.isNotEmpty && await File(localPath).exists()) {
-        // Local file available — use it directly
         await audioPlayer.setFilePath(localPath);
       } else if (note.audioUrl != null && note.audioUrl!.isNotEmpty) {
-        // No local file — download from cloud, then play locally
         isLoadingAudio.value = true;
-        final audioSync = Get.find<AudioSyncService>();
-        final downloadedPath = await audioSync.downloadAudio(
-          noteId: note.id,
-          audioUrl: note.audioUrl!,
-        );
-        isLoadingAudio.value = false;
+        try {
+          final audioSync = Get.find<AudioSyncService>();
+          final downloadedPath = await audioSync.downloadAudio(
+            noteId: note.id,
+            audioUrl: note.audioUrl!,
+          );
 
-        if (downloadedPath != null) {
-          await audioPlayer.setFilePath(downloadedPath);
-
-          // Update the note with the local path so we don't re-download
-          final appController = Get.find<AppController>();
-          final updated = note.copyWith(audioPath: downloadedPath);
-          await appController.updateNote(updated);
-        } else {
-          // Fallback: try streaming directly from the URL
-          await audioPlayer.setUrl(note.audioUrl!);
+          if (downloadedPath != null) {
+            await audioPlayer.setFilePath(downloadedPath);
+            // Persist local path so we don't re-download
+            final appController = Get.find<AppController>();
+            final updated = note.copyWith(audioPath: downloadedPath);
+            await appController.updateNote(updated);
+          } else {
+            // Fallback: stream directly from URL
+            await audioPlayer.setUrl(note.audioUrl!);
+          }
+        } finally {
+          isLoadingAudio.value = false;
         }
       } else {
-        debugPrint('No audio available for note ${note.id}');
+        audioError.value = 'Audio file not found on this device.';
         return;
       }
 
-      audioPlayer.durationStream.listen(
-        (d) => duration.value = d ?? Duration.zero,
-      );
+      audioPlayer.durationStream.listen((d) => duration.value = d ?? Duration.zero);
       audioPlayer.positionStream.listen((p) => position.value = p);
-      audioPlayer.playerStateStream.listen(
-        (state) => isPlaying.value = state.playing,
-      );
+      audioPlayer.playerStateStream.listen((state) => isPlaying.value = state.playing);
     } catch (e) {
       isLoadingAudio.value = false;
-      debugPrint('Error loading audio: $e');
+      audioError.value = 'Could not load audio: ${e.toString()}';
+      debugPrint('NoteDetailController._initAudio error: $e');
     }
   }
 

@@ -53,8 +53,11 @@ class NoteDetailScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Initialize the controller for this specific note with a unique tag
-    final controller = Get.put(NoteDetailController(note), tag: note.id);
+    // Use existing controller if already registered for this note,
+    // otherwise create and initialize a new one.
+    final controller = Get.isRegistered<NoteDetailController>(tag: note.id)
+        ? Get.find<NoteDetailController>(tag: note.id)
+        : Get.put(NoteDetailController(note), tag: note.id);
 
     return LayoutBuilder(
       builder: (context, constraints) {

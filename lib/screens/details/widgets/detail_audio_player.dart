@@ -28,9 +28,34 @@ class DetailAudioPlayer extends StatelessWidget {
       final isPlaying = controller.isPlaying.value;
       final duration = controller.duration.value;
       final position = controller.position.value;
+      final error = controller.audioError.value;
       final progress = duration.inMilliseconds > 0
           ? position.inMilliseconds / duration.inMilliseconds
           : 0.0;
+
+      // Show error state
+      if (error.isNotEmpty) {
+        return Padding(
+          padding: EdgeInsets.symmetric(
+            horizontal: AppSpacing.pageHorizontal,
+            vertical: AppSpacing.sm,
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.warning_amber_rounded, size: 16, color: theme.colorScheme.error),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  error,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: theme.colorScheme.error,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      }
 
       return Container(
         padding: EdgeInsets.fromLTRB(
