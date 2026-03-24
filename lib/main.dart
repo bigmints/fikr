@@ -16,6 +16,8 @@ import 'services/storage_service.dart';
 import 'services/openai_service.dart';
 import 'services/audio_sync_service.dart';
 import 'services/widget_service.dart';
+import 'tools/tool_initializer.dart';
+import 'tools/engine/engine_controller.dart';
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -68,6 +70,10 @@ Future<void> main() async {
   final appController = Get.put(AppController());
   Get.put(ThemeController());
   await appController.initialize();
+
+  // Initialize tools + skills engine (must be after AppController)
+  initializeTools();
+  await Get.putAsync(() async => EngineController());
 
   // Show onboarding only when the user hasn't completed it yet.
   final onboardingDone =

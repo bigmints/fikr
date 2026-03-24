@@ -16,7 +16,6 @@ import '../models/analysis_result.dart';
 import '../models/app_config.dart';
 import '../models/llm_provider.dart';
 import '../models/note.dart';
-import '../services/openai_service.dart';
 import '../services/storage_service.dart';
 import '../services/toast_service.dart';
 import '../services/sync_service.dart';
@@ -24,18 +23,17 @@ import '../services/firebase_service.dart';
 import '../services/fikr_api_service.dart';
 import '../services/audio_sync_service.dart';
 import '../services/widget_service.dart';
+import '../tools/engine/engine_controller.dart';
 import '../widgets/ai_data_consent_dialog.dart';
 import 'theme_controller.dart';
 import 'package:flutter/material.dart';
 
 class AppController extends GetxController with WidgetsBindingObserver {
-  AppController({StorageService? storageService, LLMService? llmService})
+  AppController({StorageService? storageService})
     : storage = storageService ?? Get.find<StorageService>(),
-      openAI = llmService ?? Get.find<LLMService>(),
       subscription = Get.put(SubscriptionController());
 
   final StorageService storage;
-  final LLMService openAI;
   final SubscriptionController subscription;
   final AudioPlayer _player = AudioPlayer();
 
@@ -249,39 +247,30 @@ class AppController extends GetxController with WidgetsBindingObserver {
     return note;
   }
 
+  /// Routes: Free/Plus → BYOK, Pro → Managed Vertex AI.
+  /// Both paths now go through the [EngineController] tool pipeline.
   Future<void> addNoteFromAudio(File tempAudioFile) async {
     errorMessage.value = '';
 
     final provider = config.value.activeProvider;
+    final isPro = subscription.hasManagedVertexAI;
 
-    if (provider == null) {
+    if (!isPro && provider == null) {
       errorMessage.value = 'Fikr isn\'t set up yet. Go to Settings.';
       return;
     }
 
-    // Ensure user has consented to AI data sharing (App Store 5.1.1 / 5.1.2)
-    if (!await _ensureAIConsent(provider)) return;
-
-    // Check for Managed AI (Pro/Pro+)
-    if (subscription.hasManagedVertexAI) {
-      await _processWithManagedAI(tempAudioFile);
-      return;
-    }
-
-    // Resolve models from Remote Config (not local config)
-    final byokModels = FirebaseService().getByokModels(provider.type);
-
-    final apiKey = await storage.getApiKey(provider.id);
-    if (apiKey == null || apiKey.isEmpty) {
-      errorMessage.value = 'Missing API key. Go to Settings.';
-      return;
+    // Ensure AI data consent (BYOK users only)
+    if (!isPro) {
+      if (!await _ensureAIConsent(provider!)) return;
     }
 
     try {
-      final id = const Uuid().v4();
+      final id        = const Uuid().v4();
       final timestamp = DateTime.now();
       final audioPath = await _persistAudio(tempAudioFile, id);
 
+      // ── Optimistic: show processing card immediately ──────────────────
       final dummyNote = Note(
         id: id,
         createdAt: timestamp,
@@ -298,13 +287,21 @@ class AppController extends GetxController with WidgetsBindingObserver {
       notes.insert(0, dummyNote);
       notes.refresh();
 
-      final transcript = await openAI.transcribeAudio(
-        audioFile: File(audioPath),
-        provider: provider,
-        model: byokModels.transcription,
-        apiKey: apiKey,
-        language: config.value.language,
+      // ── Step 1: Transcribe via tool engine ────────────────────────────
+      final engine = Get.find<EngineController>();
+      final transcribeResult = await engine.executeTool(
+        'ai.transcribe',
+        {'audioPath': audioPath},
       );
+
+      if (!transcribeResult.success) {
+        notes.removeWhere((n) => n.id == id);
+        notes.refresh();
+        _handleAiError(transcribeResult.error ?? 'Transcription failed.');
+        return;
+      }
+
+      final transcript = (transcribeResult.data as Map<String, dynamic>)['transcript'] as String? ?? '';
 
       if (transcript.trim().isEmpty) {
         notes.removeWhere((n) => n.id == id);
@@ -319,56 +316,62 @@ class AppController extends GetxController with WidgetsBindingObserver {
         return;
       }
 
-      final dummyAnalyze = dummyNote.copyWith(title: 'Analyzing...', text: 'Extracting insights from your note.');
-      final index = notes.indexWhere((n) => n.id == id);
-      if (index != -1) {
-        notes[index] = dummyAnalyze;
+      // Update dummy: show analyzing state
+      final analyzeIdx = notes.indexWhere((n) => n.id == id);
+      if (analyzeIdx != -1) {
+        notes[analyzeIdx] = dummyNote.copyWith(
+          title: 'Analyzing...',
+          text: 'Extracting insights from your note.',
+        );
         notes.refresh();
       }
 
-      final analysis = await openAI.analyzeTranscript(
-        transcript: transcript,
-        provider: provider,
-        model: byokModels.analysis,
-        apiKey: apiKey,
-        buckets: config.value.buckets,
-        multiBucket: config.value.multiBucket,
+      // ── Step 2: Analyze via tool engine ───────────────────────────────
+      final analyzeResult = await engine.executeTool(
+        'ai.analyze',
+        {
+          'transcript': transcript,
+          'buckets': config.value.buckets,
+        },
       );
 
-      await _finalizeNoteCreation(
-        id,
-        timestamp,
-        audioPath,
-        transcript,
-        analysis,
+      if (!analyzeResult.success) {
+        notes.removeWhere((n) => n.id == id);
+        notes.refresh();
+        _handleAiError(analyzeResult.error ?? 'Analysis failed.');
+        return;
+      }
+
+      final analysis = AnalysisResult.fromJson(
+        analyzeResult.data as Map<String, dynamic>,
       );
+
+      await _finalizeNoteCreation(id, timestamp, audioPath, transcript, analysis);
+
+      // Refresh usage counters for Pro users
+      if (isPro) unawaited(fetchUsageStats());
     } catch (error) {
       debugPrint('Note processing error: $error');
-      // On failure, remove the dummy note so it doesn't stay stuck
-      if (notes.isNotEmpty && notes.first.isProcessing) {
-         notes.removeWhere((n) => n.isProcessing && n.title.contains('...'));
-         notes.refresh();
-      }
-      
-      final errStr = error.toString();
-      String userMessage;
-      if (errStr.contains('401') || errStr.contains('403')) {
-        userMessage = 'Invalid API key. Please check your API key in Settings.';
-      } else if (errStr.contains('insufficient_quota') ||
-          errStr.contains('exceeded')) {
-        userMessage =
-            'API quota exceeded. Please check your billing or plan with your provider.';
-      } else if (errStr.contains('429')) {
-        userMessage = 'Rate limited. Please wait a moment and try again.';
-      } else if (errStr.contains('SocketException') ||
-          errStr.contains('ClientException')) {
-        userMessage = 'Network error. Please check your internet connection.';
-      } else {
-        userMessage =
-            'Note processing failed. Please check your provider settings.';
-      }
-      _notifyError(userMessage);
+      notes.removeWhere((n) => n.isProcessing && n.title.contains('...'));
+      notes.refresh();
+      _handleAiError(error.toString());
     }
+  }
+
+  void _handleAiError(String errStr) {
+    String userMessage;
+    if (errStr.contains('401') || errStr.contains('403')) {
+      userMessage = 'Invalid API key. Please check your API key in Settings.';
+    } else if (errStr.contains('insufficient_quota') || errStr.contains('exceeded')) {
+      userMessage = 'API quota exceeded. Please check your billing or plan with your provider.';
+    } else if (errStr.contains('429') || errStr.contains('limit')) {
+      userMessage = 'Monthly limit reached. Resets on the 1st of next month.';
+    } else if (errStr.contains('SocketException') || errStr.contains('ClientException')) {
+      userMessage = 'Network error. Please check your internet connection.';
+    } else {
+      userMessage = 'Processing failed. Please check your provider settings.';
+    }
+    _notifyError(userMessage);
   }
 
   Future<void> fetchUsageStats() async {
@@ -381,105 +384,6 @@ class AppController extends GetxController with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _processWithManagedAI(File tempAudioFile) async {
-    try {
-      final id        = const Uuid().v4();
-      final timestamp = DateTime.now();
-      final audioPath = await _persistAudio(tempAudioFile, id);
-
-      final dummyNote = Note(
-        id: id,
-        createdAt: timestamp,
-        updatedAt: timestamp,
-        title: 'Transcribing...',
-        text: 'Your voice note is being processed by Cloud AI.',
-        transcript: '',
-        intent: '',
-        bucket: 'General',
-        topics: const [],
-        audioPath: audioPath,
-        isProcessing: true,
-      );
-      notes.insert(0, dummyNote);
-      notes.refresh();
-
-      final fikrApi = FikrApiService();
-
-      // 1. Transcribe via fikr.one metered endpoint
-      final String transcript;
-      try {
-        transcript = await fikrApi.transcribeAudio(File(audioPath));
-      } catch (e) {
-        notes.removeWhere((n) => n.id == id);
-        notes.refresh();
-        final errStr = e.toString();
-        if (errStr.contains('429') || errStr.contains('limit')) {
-          _notifyError(
-            'Monthly transcription limit reached (500/month). '
-            'Resets on the 1st of next month.',
-          );
-        } else {
-          _notifyError('Transcription failed. Please try again.');
-        }
-        return;
-      }
-
-      if (transcript.trim().isEmpty) {
-        notes.removeWhere((n) => n.id == id);
-        notes.refresh();
-        if (Get.context != null) {
-          ToastService.showInfo(
-            Get.context!,
-            title: 'Nothing to save',
-            description: 'No speech detected in the recording.',
-          );
-        }
-        return;
-      }
-
-      final dummyAnalyze = dummyNote.copyWith(title: 'Analyzing...', text: 'Extracting insights from your note.');
-      final index = notes.indexWhere((n) => n.id == id);
-      if (index != -1) {
-        notes[index] = dummyAnalyze;
-        notes.refresh();
-      }
-
-      // 2. Analyze via fikr.one metered endpoint
-      final Map<String, dynamic> analysisData;
-      try {
-        analysisData = await fikrApi.analyzeTranscript(
-          transcript: transcript,
-          buckets: config.value.buckets,
-        );
-      } catch (e) {
-        notes.removeWhere((n) => n.id == id);
-        notes.refresh();
-        final errStr = e.toString();
-        if (errStr.contains('429') || errStr.contains('limit')) {
-          _notifyError(
-            'Monthly analysis limit reached (500/month). '
-            'Resets on the 1st of next month.',
-          );
-        } else {
-          _notifyError('Analysis failed. Please try again.');
-        }
-        return;
-      }
-
-      final analysis = AnalysisResult.fromJson(analysisData);
-      await _finalizeNoteCreation(id, timestamp, audioPath, transcript, analysis);
-
-      // Refresh usage counters after a successful note creation
-      unawaited(fetchUsageStats());
-    } catch (error) {
-      debugPrint('Managed AI processing error: $error');
-      if (notes.isNotEmpty && notes.first.isProcessing) {
-         notes.removeWhere((n) => n.isProcessing && n.title.contains('...'));
-         notes.refresh();
-      }
-      _notifyError('Note processing failed. Please try again.');
-    }
-  }
 
   Future<void> _finalizeNoteCreation(
     String id,
@@ -847,28 +751,24 @@ class AppController extends GetxController with WidgetsBindingObserver {
     try {
       final isPro = subscription.isPro;
 
-      // ── BYOK users need a configured provider + API key ──
-      LLMProvider? provider;
-      String? apiKey;
+      // BYOK guard — ensure provider + key + consent
       if (!isPro) {
-        provider = config.value.activeProvider;
+        final provider = config.value.activeProvider;
         if (provider == null) {
           _notifyError('Set up an AI provider in Settings → AI Service first.');
           return;
         }
-        apiKey = await storage.getApiKey(provider.id);
+        final apiKey = await storage.getApiKey(provider.id);
         if (apiKey == null || apiKey.isEmpty) {
           _notifyError('API key missing for ${provider.name}. Check Settings → AI Service.');
           return;
         }
-        // Ensure user has consented to AI data sharing
         if (!await _ensureAIConsent(provider)) return;
       }
 
       insightsUpdateStatus.value = 'Analyzing your notes...';
-      final allBuckets = config.value.buckets;
 
-      // Filter out notes without meaningful content
+      // Filter meaningful notes
       final meaningful = notes.where((note) {
         final content = note.text.isNotEmpty ? note.text : note.transcript;
         return content.trim().length >= 10;
@@ -879,57 +779,43 @@ class AppController extends GetxController with WidgetsBindingObserver {
         return;
       }
 
-      final payloadNotes = meaningful
-          .map(
-            (note) => {
-              'title': note.title,
-              'text': note.text.isNotEmpty ? note.text : note.transcript,
-              'topics': note.topics,
-              'createdAt': note.createdAt.toIso8601String(),
-            },
-          )
-          .toList();
+      final payloadNotes = meaningful.map((note) => {
+        'title': note.title,
+        'text': note.text.isNotEmpty ? note.text : note.transcript,
+        'topics': note.topics,
+        'createdAt': note.createdAt.toIso8601String(),
+      }).toList();
 
       insightsUpdateStatus.value = 'Synthesizing themes...';
       final existingTitles = todoItems.map((t) => t.title).toList();
 
-      // ── Branch: Pro → fikr.one backend, BYOK → user's LLM provider ──
-      final GeneratedInsights generated;
-      if (isPro) {
-        final fikrApi = FikrApiService();
-        final rawJson = await fikrApi.generateInsights(
-          notes: payloadNotes,
-          buckets: allBuckets,
-          existingTaskTitles: existingTitles,
-        );
-        generated = GeneratedInsights.fromJson(rawJson);
-      } else {
-        final byokModels = FirebaseService().getByokModels(provider!.type);
-        generated = await openAI.generateInsights(
-          notes: payloadNotes,
-          provider: provider,
-          model: byokModels.analysis,
-          apiKey: apiKey!,
-          buckets: allBuckets,
-          existingTaskTitles: existingTitles,
-        );
+      // ── Delegate to ai.insights tool (handles Pro vs BYOK internally) ──
+      final engine = Get.find<EngineController>();
+      final insightsResult = await engine.executeTool(
+        'ai.insights',
+        {
+          'notes': payloadNotes,
+          'buckets': config.value.buckets,
+          'existingTaskTitles': existingTitles,
+        },
+      );
+
+      if (!insightsResult.success) {
+        _notifyError(insightsResult.error ?? 'Insight generation failed.');
+        return;
       }
 
       insightsUpdateStatus.value = 'Generating insights...';
+      final rawInsights = insightsResult.data as Map<String, dynamic>;
+      final generated = GeneratedInsights.fromJson(rawInsights);
       generatedInsights.value = generated;
 
       if (generated.llmTasks.isNotEmpty) {
         await _mergeGeneratedTasks(generated.llmTasks);
       } else if (generated.nextSteps.isNotEmpty) {
-        // Fallback: convert nextSteps strings into tasks
         final fallbackTasks = generated.nextSteps
             .take(5)
-            .map(
-              (step) => <String, dynamic>{
-                'title': step,
-                'source_note_title': 'LLM insight',
-              },
-            )
+            .map((step) => <String, dynamic>{'title': step, 'source_note_title': 'LLM insight'})
             .toList();
         await _mergeGeneratedTasks(fallbackTasks);
       }
@@ -939,7 +825,6 @@ class AppController extends GetxController with WidgetsBindingObserver {
       }
 
       insightsUpdateStatus.value = 'Saving this edition...';
-      // Keep only 1 highlight per bucket (first one wins).
       final seenBuckets = <String>{};
       final highlights = <InsightHighlight>[];
       for (final item in generated.highlights) {
@@ -952,15 +837,15 @@ class AppController extends GetxController with WidgetsBindingObserver {
           icon: item.icon,
         ));
       }
+
       final edition = InsightEdition(
         id: const Uuid().v4(),
         createdAt: DateTime.now(),
-        summary: generated.summary.isNotEmpty
-            ? generated.summary
-            : 'No summary available yet.',
+        summary: generated.summary.isNotEmpty ? generated.summary : 'No summary available yet.',
         highlights: highlights,
-        buckets: allBuckets,
+        buckets: config.value.buckets,
       );
+
       final snapshot = List<InsightEdition>.from(insightEditions);
       insightEditions.insert(0, edition);
       insightEditions.refresh();
@@ -972,6 +857,8 @@ class AppController extends GetxController with WidgetsBindingObserver {
         _notifyError('Failed to save insights. Please try again.');
         return;
       }
+
+      if (isPro) unawaited(fetchUsageStats());
     } catch (error) {
       _notifyError(error.toString());
     } finally {

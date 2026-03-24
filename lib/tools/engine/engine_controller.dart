@@ -8,6 +8,8 @@ library;
 
 import 'package:get/get.dart';
 
+import '../../controllers/app_controller.dart';
+import '../../controllers/subscription_controller.dart';
 import '../../models/app_config.dart';
 import '../../services/storage_service.dart';
 import '../tool_interface.dart';
@@ -44,17 +46,15 @@ class EngineController extends GetxService {
   /// Build a [ToolContext] from current app state.
   ToolContext _buildContext() {
     final storage = Get.find<StorageService>();
-    // Try to get current config from AppController if available
     AppConfig config;
     try {
-      final appCtrl = Get.find<dynamic>(tag: null);
-      config = appCtrl.config.value as AppConfig;
+      config = Get.find<AppController>().config.value;
     } catch (_) {
       config = AppConfig.fromJson({});
     }
 
     return ToolContext(
-      userId: null, // set by caller if needed
+      userId: null,
       planTier: _currentTier(),
       config: config,
       storage: storage,
@@ -63,7 +63,7 @@ class EngineController extends GetxService {
 
   ToolTier _currentTier() {
     try {
-      final sub = Get.find<dynamic>(tag: 'subscription');
+      final sub = Get.find<SubscriptionController>();
       if (sub.isPro) return ToolTier.pro;
       if (sub.isPlus) return ToolTier.plus;
     } catch (_) {}

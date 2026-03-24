@@ -31,6 +31,8 @@ class SubscriptionController extends GetxController {
       currentTier.value == SubscriptionTier.pro ||
       currentTier.value == SubscriptionTier.proPlus;
 
+  bool get isPlus => currentTier.value == SubscriptionTier.plus;
+
   // Vertex AI Access
   bool get hasManagedVertexAI =>
       currentTier.value == SubscriptionTier.pro ||
