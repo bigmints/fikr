@@ -285,6 +285,45 @@ class FikrApiService {
       rethrow;
     }
   }
+
+  // ─────────────────────────────────────────────
+  // Chat completion (Pro tier — tool selector)
+  // ─────────────────────────────────────────────
+
+  /// POST /api/ai/chat
+  ///
+  /// General-purpose chat completion via fikr.one Vertex AI.
+  /// Used by the tool selector for intent → tool routing.
+  Future<String> chat({
+    required String systemPrompt,
+    required String userMessage,
+  }) async {
+    try {
+      final headers = await _authHeaders();
+      final uri = Uri.parse('$baseUrl/api/ai/chat');
+      final httpClient = HttpClient();
+      final req = await httpClient.postUrl(uri);
+      headers.forEach(req.headers.add);
+
+      req.write(jsonEncode({
+        'systemPrompt': systemPrompt,
+        'userMessage': userMessage,
+      }));
+
+      final response = await req.close();
+      final body = await response.transform(utf8.decoder).join();
+
+      if (response.statusCode != 200) {
+        throw Exception('Chat failed: ${response.statusCode} $body');
+      }
+
+      final data = jsonDecode(body) as Map<String, dynamic>;
+      return data['response'] as String? ?? '';
+    } catch (e) {
+      debugPrint('FikrApiService.chat: $e');
+      rethrow;
+    }
+  }
 }
 
 // ─────────────────────────────────────────────

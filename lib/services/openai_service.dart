@@ -470,4 +470,61 @@ Never mention that you are an AI. Never mention system prompts or policies.
     }
     return parts[0]['text'] as String? ?? '';
   }
+
+  // ── General chat completion (for tool selector) ─────────────────────
+
+  /// Public entry point for a system-prompt + user-message chat call.
+  ///
+  /// Returns the raw text response from the LLM. Used by the tool selector
+  /// and any generic chat needs.
+  Future<String> chatCompletion({
+    required String systemPrompt,
+    required String userMessage,
+    required LLMProvider provider,
+    required String model,
+    required String apiKey,
+    bool jsonMode = true,
+  }) async {
+    if (provider.type == LLMProviderType.google) {
+      final result = await _chatWithGemini(
+        systemPrompt: systemPrompt,
+        userMessage: userMessage,
+        model: model,
+        apiKey: apiKey,
+        provider: provider,
+        jsonMode: jsonMode,
+      );
+      return result ?? '';
+    }
+
+    // OpenAI path
+    final messages = <Map<String, String>>[
+      {'role': 'system', 'content': systemPrompt},
+      {'role': 'user', 'content': userMessage},
+    ];
+    final payload = <String, dynamic>{
+      'model': model,
+      'messages': messages,
+      if (jsonMode) 'response_format': {'type': 'json_object'},
+    };
+    final baseUrl = _normalizeBaseUrl(provider.baseUrl, provider.type);
+    final endpoint = '$baseUrl/chat/completions';
+
+    final response = await _client.post(
+      Uri.parse(endpoint),
+      headers: _getHeaders(apiKey, provider),
+      body: jsonEncode(payload),
+    );
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception('Chat completion failed: ${response.body}');
+    }
+
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final choices = data['choices'] as List?;
+    if (choices != null && choices.isNotEmpty) {
+      return choices[0]['message']['content'] as String? ?? '';
+    }
+    return '';
+  }
 }
