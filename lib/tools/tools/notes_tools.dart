@@ -10,7 +10,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'package:uuid/uuid.dart';
 
-import '../../controllers/app_controller.dart';
+import '../../controllers/i_app_state.dart';
 import '../../models/note.dart';
 import '../tool_interface.dart';
 
@@ -64,7 +64,7 @@ class NotesListTool extends FikrTool {
     ToolContext context,
   ) async {
     try {
-      final ctrl = Get.find<AppController>();
+      final ctrl = Get.find<IAppState>();
       final bucket = params['bucket'] as String? ?? 'All';
       final search = params['search'] as String? ?? '';
       final limit = params['limit'] as int? ?? 50;
@@ -156,7 +156,7 @@ class NotesGetTool extends FikrTool {
     ToolContext context,
   ) async {
     try {
-      final ctrl = Get.find<AppController>();
+      final ctrl = Get.find<IAppState>();
       final id = params['id'] as String;
       final note = ctrl.notes.firstWhereOrNull((n) => n.id == id);
       if (note == null) return ToolResult.fail('Note not found: $id');
@@ -206,7 +206,7 @@ class NotesCreateTool extends FikrTool {
     ToolContext context,
   ) async {
     try {
-      final ctrl = Get.find<AppController>();
+      final ctrl = Get.find<IAppState>();
       final now = DateTime.now();
       final note = Note(
         id: const Uuid().v4(),
@@ -270,7 +270,7 @@ class NotesUpdateTool extends FikrTool {
     ToolContext context,
   ) async {
     try {
-      final ctrl = Get.find<AppController>();
+      final ctrl = Get.find<IAppState>();
       final id = params['id'] as String;
       final existing = ctrl.notes.firstWhereOrNull((n) => n.id == id);
       if (existing == null) return ToolResult.fail('Note not found: $id');
@@ -325,7 +325,7 @@ class NotesArchiveTool extends FikrTool {
     ToolContext context,
   ) async {
     try {
-      final ctrl = Get.find<AppController>();
+      final ctrl = Get.find<IAppState>();
       await ctrl.archiveNote(params['id'] as String);
       return ToolResult.ok({'archived': params['id']});
     } catch (e) {
@@ -367,7 +367,7 @@ class NotesDeleteTool extends FikrTool {
     ToolContext context,
   ) async {
     try {
-      final ctrl = Get.find<AppController>();
+      final ctrl = Get.find<IAppState>();
       await ctrl.deleteNote(params['id'] as String);
       return ToolResult.ok({'deleted': params['id']});
     } catch (e) {
@@ -455,7 +455,7 @@ class NotesExportTool extends FikrTool {
     ToolContext context,
   ) async {
     try {
-      final ctrl = Get.find<AppController>();
+      final ctrl = Get.find<IAppState>();
       String? dir = params['directory'] as String?;
 
       if (dir == null || dir.isEmpty) {

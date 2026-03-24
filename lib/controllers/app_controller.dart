@@ -28,7 +28,11 @@ import '../widgets/ai_data_consent_dialog.dart';
 import 'theme_controller.dart';
 import 'package:flutter/material.dart';
 
-class AppController extends GetxController with WidgetsBindingObserver {
+import 'i_app_state.dart';
+
+class AppController extends GetxController
+    with WidgetsBindingObserver
+    implements IAppState {
   AppController({StorageService? storageService})
     : storage = storageService ?? Get.find<StorageService>(),
       subscription = Get.put(SubscriptionController());
@@ -514,6 +518,7 @@ class AppController extends GetxController with WidgetsBindingObserver {
     await saveNotes();
   }
 
+  @override
   Future<void> deleteNote(String id) async {
     final existing = notes.firstWhereOrNull((note) => note.id == id);
     notes.removeWhere((note) => note.id == id);
@@ -601,6 +606,7 @@ class AppController extends GetxController with WidgetsBindingObserver {
     return exportDir.path;
   }
 
+  @override
   Future<String?> exportAll(String directoryPath) async {
     final allNotes = await storage.loadNotes();
     if (allNotes.isEmpty) return null;
@@ -685,6 +691,7 @@ class AppController extends GetxController with WidgetsBindingObserver {
     );
   }
 
+  @override
   Future<void> toggleTaskComplete(String id) async {
     todoItems.value = todoItems.map((item) {
       if (item.id != id) return item;
@@ -697,6 +704,7 @@ class AppController extends GetxController with WidgetsBindingObserver {
     await saveTasks();
   }
 
+  @override
   Future<void> deleteTask(String id) async {
     todoItems.removeWhere((item) => item.id == id);
     await saveTasks();
@@ -735,10 +743,12 @@ class AppController extends GetxController with WidgetsBindingObserver {
     await saveReminders();
   }
 
+  @override
   Future<void> saveTasks() async {
     await storage.saveTasks(todoItems.toList());
   }
 
+  @override
   Future<void> saveReminders() async {
     await storage.saveReminders(reminders.toList());
   }

@@ -82,7 +82,7 @@ class AiTranscribeTool extends FikrTool {
         return ToolResult.fail('No AI provider configured. Go to Settings.');
       }
 
-      final apiKey = await context.storage.getApiKey(provider.id);
+      final apiKey = await context.storage!.getApiKey(provider.id);
       if (apiKey == null || apiKey.isEmpty) {
         return ToolResult.fail('Missing API key. Go to Settings.');
       }
@@ -167,7 +167,7 @@ class AiAnalyzeTool extends FikrTool {
         return ToolResult.fail('No AI provider configured.');
       }
 
-      final apiKey = await context.storage.getApiKey(provider.id);
+      final apiKey = await context.storage!.getApiKey(provider.id);
       if (apiKey == null || apiKey.isEmpty) {
         return ToolResult.fail('Missing API key.');
       }
@@ -267,7 +267,7 @@ class AiInsightsTool extends FikrTool {
         return ToolResult.fail('No AI provider configured.');
       }
 
-      final apiKey = await context.storage.getApiKey(provider.id);
+      final apiKey = await context.storage!.getApiKey(provider.id);
       if (apiKey == null || apiKey.isEmpty) {
         return ToolResult.fail('Missing API key.');
       }

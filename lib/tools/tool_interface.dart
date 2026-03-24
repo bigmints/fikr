@@ -77,7 +77,7 @@ class ToolContext {
     this.userId,
     required this.planTier,
     required this.config,
-    required this.storage,
+    this.storage,
   });
 
   /// Current Firebase UID (null if signed out / free tier).
@@ -89,8 +89,9 @@ class ToolContext {
   /// Current app configuration snapshot.
   final AppConfig config;
 
-  /// Local storage service.
-  final StorageService storage;
+  /// Local storage service. May be null for local-only tools that use
+  /// [IAppState] via [Get.find] and do not need direct storage access.
+  final StorageService? storage;
 }
 
 // ---------------------------------------------------------------------------

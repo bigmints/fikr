@@ -177,7 +177,7 @@ Respond with ONLY valid JSON. Choose one of these formats:
       throw StateError('No AI provider configured.');
     }
 
-    final apiKey = await context.storage.getApiKey(provider.id);
+    final apiKey = await context.storage!.getApiKey(provider.id);
     if (apiKey == null || apiKey.isEmpty) {
       throw StateError('Missing API key.');
     }

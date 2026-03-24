@@ -4,7 +4,7 @@ library;
 import 'package:get/get.dart';
 import 'package:uuid/uuid.dart';
 
-import '../../controllers/app_controller.dart';
+import '../../controllers/i_app_state.dart';
 import '../../models/insights_models.dart';
 import '../tool_interface.dart';
 
@@ -44,7 +44,7 @@ class RemindersListTool extends FikrTool {
     ToolContext context,
   ) async {
     try {
-      final ctrl = Get.find<AppController>();
+      final ctrl = Get.find<IAppState>();
       final includeAll = params['includeDissmissed'] as bool? ?? false;
 
       var items = ctrl.reminders.toList();
@@ -101,7 +101,7 @@ class RemindersCreateTool extends FikrTool {
     ToolContext context,
   ) async {
     try {
-      final ctrl = Get.find<AppController>();
+      final ctrl = Get.find<IAppState>();
       final item = ReminderItem(
         id: const Uuid().v4(),
         title: params['title'] as String,
@@ -150,7 +150,7 @@ class RemindersDismissTool extends FikrTool {
     ToolContext context,
   ) async {
     try {
-      final ctrl = Get.find<AppController>();
+      final ctrl = Get.find<IAppState>();
       final id = params['id'] as String;
       final index = ctrl.reminders.indexWhere((r) => r.id == id);
       if (index == -1) return ToolResult.fail('Reminder not found: $id');
@@ -198,7 +198,7 @@ class RemindersRescheduleTool extends FikrTool {
     ToolContext context,
   ) async {
     try {
-      final ctrl = Get.find<AppController>();
+      final ctrl = Get.find<IAppState>();
       final id = params['id'] as String;
       final index = ctrl.reminders.indexWhere((r) => r.id == id);
       if (index == -1) return ToolResult.fail('Reminder not found: $id');

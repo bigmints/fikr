@@ -152,7 +152,7 @@ class McpListServersTool extends FikrTool {
       }
 
       // Free/Plus — read from local storage
-      final servers = await _McpConfigStore.loadServers(context.storage);
+      final servers = await _McpConfigStore.loadServers(context.storage!);
       return ToolResult.ok({'servers': servers, 'source': 'local'});
     } catch (e) {
       return ToolResult.fail('Failed to list MCP servers: $e');
@@ -199,7 +199,7 @@ class McpRegisterTool extends FikrTool {
       final url = params['url'] as String;
       final apiKey = params['apiKey'] as String?;
 
-      final servers = await _McpConfigStore.loadServers(context.storage);
+      final servers = await _McpConfigStore.loadServers(context.storage!);
       final newServer = {
         'id': DateTime.now().millisecondsSinceEpoch.toString(),
         'name': serverName,
@@ -209,7 +209,7 @@ class McpRegisterTool extends FikrTool {
         'createdAt': DateTime.now().toIso8601String(),
       };
       servers.add(newServer);
-      await _McpConfigStore.saveServers(context.storage, servers);
+      await _McpConfigStore.saveServers(context.storage!, servers);
 
       return ToolResult.ok(newServer);
     } catch (e) {
@@ -252,7 +252,7 @@ class McpDiscoverToolsTool extends FikrTool {
   ) async {
     try {
       final serverId = params['serverId'] as String;
-      final servers = await _McpConfigStore.loadServers(context.storage);
+      final servers = await _McpConfigStore.loadServers(context.storage!);
       final server = servers.firstWhere(
         (s) => s['id'] == serverId,
         orElse: () => <String, dynamic>{},
@@ -321,7 +321,7 @@ class McpInvokeTool extends FikrTool {
       }
 
       // Free/Plus → direct client-side call
-      final servers = await _McpConfigStore.loadServers(context.storage);
+      final servers = await _McpConfigStore.loadServers(context.storage!);
       final server = servers.firstWhere(
         (s) => s['id'] == serverId,
         orElse: () => <String, dynamic>{},

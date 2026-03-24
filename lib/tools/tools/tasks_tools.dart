@@ -4,7 +4,7 @@ library;
 import 'package:get/get.dart';
 import 'package:uuid/uuid.dart';
 
-import '../../controllers/app_controller.dart';
+import '../../controllers/i_app_state.dart';
 import '../../models/insights_models.dart';
 import '../tool_interface.dart';
 
@@ -46,7 +46,7 @@ class TasksListTool extends FikrTool {
     ToolContext context,
   ) async {
     try {
-      final ctrl = Get.find<AppController>();
+      final ctrl = Get.find<IAppState>();
       final status = params['status'] as String? ?? 'all';
       final limit = params['limit'] as int? ?? 50;
 
@@ -108,7 +108,7 @@ class TasksCreateTool extends FikrTool {
     ToolContext context,
   ) async {
     try {
-      final ctrl = Get.find<AppController>();
+      final ctrl = Get.find<IAppState>();
       final item = TodoItem(
         id: const Uuid().v4(),
         title: params['title'] as String,
@@ -162,7 +162,7 @@ class TasksUpdateTool extends FikrTool {
     ToolContext context,
   ) async {
     try {
-      final ctrl = Get.find<AppController>();
+      final ctrl = Get.find<IAppState>();
       final id = params['id'] as String;
       final index = ctrl.todoItems.indexWhere((t) => t.id == id);
       if (index == -1) return ToolResult.fail('Task not found: $id');
@@ -217,7 +217,7 @@ class TasksCompleteTool extends FikrTool {
     ToolContext context,
   ) async {
     try {
-      final ctrl = Get.find<AppController>();
+      final ctrl = Get.find<IAppState>();
       await ctrl.toggleTaskComplete(params['id'] as String);
       return ToolResult.ok({'toggled': params['id']});
     } catch (e) {
@@ -258,7 +258,7 @@ class TasksDeleteTool extends FikrTool {
     ToolContext context,
   ) async {
     try {
-      final ctrl = Get.find<AppController>();
+      final ctrl = Get.find<IAppState>();
       await ctrl.deleteTask(params['id'] as String);
       return ToolResult.ok({'deleted': params['id']});
     } catch (e) {
@@ -300,7 +300,7 @@ class TasksLinkNoteTool extends FikrTool {
     ToolContext context,
   ) async {
     try {
-      final ctrl = Get.find<AppController>();
+      final ctrl = Get.find<IAppState>();
       final taskId = params['taskId'] as String;
       final noteId = params['noteId'] as String;
 
