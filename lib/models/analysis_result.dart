@@ -11,6 +11,13 @@ class AnalysisResult {
   final String bucket;
   final List<String> topics;
 
+  Map<String, dynamic> toJson() => {
+    'cleanedText': cleanedText,
+    'intent': intent,
+    'bucket': bucket,
+    'topics': topics,
+  };
+
   factory AnalysisResult.fromJson(Map<String, dynamic> json) {
     return AnalysisResult(
       cleanedText: json['cleanedText'] as String? ?? '',

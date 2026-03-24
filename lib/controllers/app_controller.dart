@@ -171,7 +171,7 @@ class AppController extends GetxController with WidgetsBindingObserver {
     reminders.value = await storage.loadReminders();
     if (todoItems.isEmpty) {
       todoItems.value = _extractActionItems(notes);
-      await _saveTasks();
+      await saveTasks();
     }
     await refreshCanRecord();
     await _validateActiveProvider();
@@ -790,12 +790,12 @@ class AppController extends GetxController with WidgetsBindingObserver {
         return item.copyWith(status: 'done', completedAt: DateTime.now());
       }
     }).toList();
-    await _saveTasks();
+    await saveTasks();
   }
 
   Future<void> deleteTask(String id) async {
     todoItems.removeWhere((item) => item.id == id);
-    await _saveTasks();
+    await saveTasks();
   }
 
   Future<void> updateTaskTitle(String id, String newTitle) async {
@@ -803,12 +803,12 @@ class AppController extends GetxController with WidgetsBindingObserver {
       if (item.id != id) return item;
       return item.copyWith(title: newTitle);
     }).toList();
-    await _saveTasks();
+    await saveTasks();
   }
 
   Future<void> deleteCompletedTasks() async {
     todoItems.removeWhere((item) => item.isCompleted);
-    await _saveTasks();
+    await saveTasks();
   }
 
   Future<void> addTask(String title) async {
@@ -820,7 +820,7 @@ class AppController extends GetxController with WidgetsBindingObserver {
       createdAt: DateTime.now(),
     );
     todoItems.insert(0, task);
-    await _saveTasks();
+    await saveTasks();
   }
 
   Future<void> dismissReminder(String id) async {
@@ -828,14 +828,14 @@ class AppController extends GetxController with WidgetsBindingObserver {
       if (item.id != id) return item;
       return item.copyWith(isDismissed: true);
     }).toList();
-    await _saveReminders();
+    await saveReminders();
   }
 
-  Future<void> _saveTasks() async {
+  Future<void> saveTasks() async {
     await storage.saveTasks(todoItems.toList());
   }
 
-  Future<void> _saveReminders() async {
+  Future<void> saveReminders() async {
     await storage.saveReminders(reminders.toList());
   }
 
@@ -1057,7 +1057,7 @@ class AppController extends GetxController with WidgetsBindingObserver {
       );
       existingTitles.add(normalizedTitle);
     }
-    await _saveTasks();
+    await saveTasks();
   }
 
   Future<void> _mergeGeneratedReminders(
@@ -1089,7 +1089,7 @@ class AppController extends GetxController with WidgetsBindingObserver {
         ),
       );
     }
-    await _saveReminders();
+    await saveReminders();
   }
 
   bool _similarEnough(String a, String b) {
