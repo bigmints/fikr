@@ -1,7 +1,26 @@
 {
-    "firestore": {
-        "rules": "firestore.rules"
-    },
+    "firestore": [
+        {
+            "database": "(default)",
+            "rules": "firestore.rules",
+            "indexes": "firestore.indexes.json"
+        },
+        {
+            "database": "prod-fikr",
+            "rules": "firestore.rules",
+            "indexes": "firestore.indexes.json"
+        },
+        {
+            "database": "dev-fikr-studio",
+            "rules": "studio.rules",
+            "indexes": "studio.indexes.json"
+        },
+        {
+            "database": "prod-fikr-studio",
+            "rules": "studio.rules",
+            "indexes": "studio.indexes.json"
+        }
+    ],
     "storage": {
         "rules": "storage.rules"
     },

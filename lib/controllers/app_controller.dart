@@ -9,7 +9,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:uuid/uuid.dart';
-import 'package:fikr/models/insights_models.dart';
+import '../models/insights_models.dart';
 import 'subscription_controller.dart';
 
 import '../models/analysis_result.dart';
@@ -22,8 +22,11 @@ import '../services/sync_service.dart';
 import '../services/firebase_service.dart';
 import '../services/fikr_api_service.dart';
 import '../services/audio_sync_service.dart';
+import '../services/notification_service.dart';
 import '../services/widget_service.dart';
 import '../tools/engine/engine_controller.dart';
+import '../tools/hooks/hook_engine.dart';
+import '../tools/tool_interface.dart';
 import '../widgets/ai_data_consent_dialog.dart';
 import 'theme_controller.dart';
 import 'package:flutter/material.dart';
@@ -41,6 +44,7 @@ class AppController extends GetxController
   final SubscriptionController subscription;
   final AudioPlayer _player = AudioPlayer();
 
+  @override
   final Rx<AppConfig> config = AppConfig(
     activeProvider: null,
     analysisModel: '',
@@ -60,7 +64,9 @@ class AppController extends GetxController
     themeMode: 'system',
   ).obs;
 
+  @override
   final RxList<Note> notes = <Note>[].obs;
+  final List<Note> _allNotes = <Note>[];
   final Rx<Note?> selectedNote = Rx<Note?>(null);
   final RxString selectedBucket = 'All'.obs;
   final RxString sortOrder = 'newest'.obs;
@@ -70,7 +76,9 @@ class AppController extends GetxController
   final RxBool loading = false.obs;
   final RxBool canRecord = false.obs;
   final RxString errorMessage = ''.obs;
+  @override
   final RxList<TodoItem> todoItems = <TodoItem>[].obs;
+  @override
   final RxList<ReminderItem> reminders = <ReminderItem>[].obs;
   final RxList<InsightEdition> insightEditions = <InsightEdition>[].obs;
   final Rx<GeneratedInsights?> generatedInsights = Rx<GeneratedInsights?>(null);
@@ -145,9 +153,9 @@ class AppController extends GetxController
       debugPrint('Failed to init Firebase Service/Remote Config: $e');
     }
 
-    notes.value = (await storage.loadNotes())
-        .where((note) => !note.archived)
-        .toList();
+    _allNotes.clear();
+    _allNotes.addAll(await storage.loadNotes());
+    notes.value = _allNotes.where((note) => !note.archived).toList();
 
     // Check if we need to reset to the new bucket system
     final expectedBuckets = [
@@ -175,11 +183,21 @@ class AppController extends GetxController
       todoItems.value = _extractActionItems(notes);
       await saveTasks();
     }
+
+    // Initialize OS notification service and reschedule all active reminders
+    await NotificationService.instance.initialize();
+    for (final r in reminders) {
+      if (!r.isDismissed && !r.isNotified) {
+        unawaited(NotificationService.instance.scheduleReminder(r));
+      }
+    }
+
     await refreshCanRecord();
     await _validateActiveProvider();
 
   }
 
+  @override
   Future<void> updateConfig(AppConfig next) async {
     await storage.saveConfig(next);
     config.value = next;
@@ -230,6 +248,7 @@ class AppController extends GetxController
     }
   }
 
+  @override
   Future<Note> createEmptyNote() async {
     final id = const Uuid().v4();
     final now = DateTime.now();
@@ -247,12 +266,61 @@ class AppController extends GetxController
       archived: false,
     );
     notes.insert(0, note);
+    _allNotes.insert(0, note);
     await saveNotes();
     return note;
   }
 
+  @override
+  Future<void> updateNoteAudioUrl(String noteId, String audioUrl) async {
+    final idx = notes.indexWhere((n) => n.id == noteId);
+    if (idx != -1) {
+      notes[idx] = notes[idx].copyWith(audioUrl: audioUrl, updatedAt: DateTime.now());
+      notes.refresh();
+    }
+    final allIdx = _allNotes.indexWhere((n) => n.id == noteId);
+    if (allIdx != -1) {
+      _allNotes[allIdx] = _allNotes[allIdx].copyWith(audioUrl: audioUrl, updatedAt: DateTime.now());
+    }
+    await saveNotes();
+  }
+
+  @override
+  Future<void> playAudio(Note note) async {
+    try {
+      if (note.audioPath != null && note.audioPath!.isNotEmpty) {
+        File localFile = File(note.audioPath!);
+        if (!await localFile.exists()) {
+          final filename = p.basename(note.audioPath!);
+          localFile = File(p.join(storage.audioDirPath, filename));
+        }
+        if (await localFile.exists()) {
+          await _player.setFilePath(localFile.path);
+          await _player.play();
+          return;
+        }
+      }
+      if (note.audioUrl != null && note.audioUrl!.isNotEmpty) {
+        final audioSync = Get.find<AudioSyncService>();
+        final localPath = await audioSync.downloadAudio(
+          noteId: note.id,
+          audioUrl: note.audioUrl!,
+        );
+        if (localPath != null) {
+          await updateNoteAudioUrl(note.id, localPath);
+          await _player.setFilePath(localPath);
+          await _player.play();
+          return;
+        }
+        await _player.setUrl(note.audioUrl!);
+        await _player.play();
+      }
+    } catch (_) {}
+  }
+
   /// Routes: Free/Plus → BYOK, Pro → Managed Vertex AI.
   /// Both paths now go through the [EngineController] tool pipeline.
+
   Future<void> addNoteFromAudio(File tempAudioFile) async {
     errorMessage.value = '';
 
@@ -264,17 +332,16 @@ class AppController extends GetxController
       return;
     }
 
-    // Ensure AI data consent (BYOK users only)
     if (!isPro) {
       if (!await _ensureAIConsent(provider!)) return;
     }
 
     try {
-      final id        = const Uuid().v4();
+      final id = const Uuid().v4();
       final timestamp = DateTime.now();
       final audioPath = await _persistAudio(tempAudioFile, id);
 
-      // ── Optimistic: show processing card immediately ──────────────────
+      // Insert processing placeholder
       final dummyNote = Note(
         id: id,
         createdAt: timestamp,
@@ -289,27 +356,25 @@ class AppController extends GetxController
         isProcessing: true,
       );
       notes.insert(0, dummyNote);
+      _allNotes.insert(0, dummyNote);
       notes.refresh();
 
-      // ── Step 1: Transcribe via tool engine ────────────────────────────
       final engine = Get.find<EngineController>();
+
+      // Step 1 — Transcribe
       final transcribeResult = await engine.executeTool(
         'ai.transcribe',
         {'audioPath': audioPath},
       );
-
       if (!transcribeResult.success) {
-        notes.removeWhere((n) => n.id == id);
-        notes.refresh();
+        _removeDummy(id);
         _handleAiError(transcribeResult.error ?? 'Transcription failed.');
         return;
       }
-
-      final transcript = (transcribeResult.data as Map<String, dynamic>)['transcript'] as String? ?? '';
-
+      final transcript =
+          (transcribeResult.data as Map<String, dynamic>)['transcript'] as String? ?? '';
       if (transcript.trim().isEmpty) {
-        notes.removeWhere((n) => n.id == id);
-        notes.refresh();
+        _removeDummy(id);
         if (Get.context != null) {
           ToastService.showInfo(
             Get.context!,
@@ -320,46 +385,75 @@ class AppController extends GetxController
         return;
       }
 
-      // Update dummy: show analyzing state
-      final analyzeIdx = notes.indexWhere((n) => n.id == id);
-      if (analyzeIdx != -1) {
-        notes[analyzeIdx] = dummyNote.copyWith(
-          title: 'Analyzing...',
-          text: 'Extracting insights from your note.',
-        );
-        notes.refresh();
-      }
+      // Update placeholder to 'Analyzing'
+      _updateDummy(id, dummyNote.copyWith(title: 'Analyzing...', text: 'Extracting insights from your note.'));
 
-      // ── Step 2: Analyze via tool engine ───────────────────────────────
+      // Step 2 — Analyze
       final analyzeResult = await engine.executeTool(
         'ai.analyze',
-        {
-          'transcript': transcript,
-          'buckets': config.value.buckets,
-        },
+        {'transcript': transcript, 'buckets': config.value.buckets},
       );
-
       if (!analyzeResult.success) {
-        notes.removeWhere((n) => n.id == id);
-        notes.refresh();
+        _removeDummy(id);
         _handleAiError(analyzeResult.error ?? 'Analysis failed.');
         return;
       }
 
-      final analysis = AnalysisResult.fromJson(
-        analyzeResult.data as Map<String, dynamic>,
+      // Step 3 — Finalize via notes.finalize tool
+      final finalizeResult = await engine.executeTool(
+        'notes.finalize',
+        {
+          'id': id,
+          'createdAt': timestamp.toIso8601String(),
+          'audioPath': audioPath,
+          'transcript': transcript,
+          'analysis': analyzeResult.data as Map<String, dynamic>,
+          'transcriptStyle': config.value.transcriptStyle,
+        },
       );
+      if (!finalizeResult.success) {
+        _removeDummy(id);
+        _handleAiError(finalizeResult.error ?? 'Note finalization failed.');
+        return;
+      }
 
-      await _finalizeNoteCreation(id, timestamp, audioPath, transcript, analysis);
+      // Step 4 — Upload audio in background (Plus/Pro)
+      if (subscription.canSync) {
+        unawaited(engine.executeTool('audio.upload', {'noteId': id, 'localPath': audioPath})
+            .then((r) {
+          if (r.success) {
+            final url = (r.data as Map<String, dynamic>?)?['audioUrl'] as String?;
+            if (url != null) updateNoteAudioUrl(id, url);
+          }
+        }));
+      }
 
-      // Refresh usage counters for Pro users
-      if (isPro) unawaited(fetchUsageStats());
+      // Step 5 — Fetch usage for Pro
+      if (isPro) {
+        unawaited(engine.executeTool('usage.fetch', {}).then((r) {
+          if (r.success) proUsageStats.value = ProUsageStats.fromJson(r.data as Map<String, dynamic>);
+        }));
+      }
     } catch (error) {
-      debugPrint('Note processing error: $error');
       notes.removeWhere((n) => n.isProcessing && n.title.contains('...'));
+      _allNotes.removeWhere((n) => n.isProcessing && n.title.contains('...'));
       notes.refresh();
       _handleAiError(error.toString());
     }
+  }
+
+  void _removeDummy(String id) {
+    notes.removeWhere((n) => n.id == id);
+    _allNotes.removeWhere((n) => n.id == id);
+    notes.refresh();
+  }
+
+  void _updateDummy(String id, Note updated) {
+    final idx = notes.indexWhere((n) => n.id == id);
+    if (idx != -1) notes[idx] = updated;
+    final allIdx = _allNotes.indexWhere((n) => n.id == id);
+    if (allIdx != -1) _allNotes[allIdx] = updated;
+    notes.refresh();
   }
 
   void _handleAiError(String errStr) {
@@ -381,29 +475,30 @@ class AppController extends GetxController
   Future<void> fetchUsageStats() async {
     if (!subscription.hasManagedVertexAI) return;
     try {
-      final stats = await FikrApiService().getUsageStats();
-      proUsageStats.value = stats;
+      final r = await Get.find<EngineController>().executeTool('usage.fetch', {});
+      if (r.success && r.data != null) {
+        proUsageStats.value = ProUsageStats.fromJson(r.data as Map<String, dynamic>);
+      }
     } catch (e) {
       debugPrint('AppController.fetchUsageStats: $e');
     }
   }
 
-
-  Future<void> _finalizeNoteCreation(
-    String id,
-    DateTime timestamp,
-    String audioPath,
-    String transcript,
-    AnalysisResult analysis,
-  ) async {
-    final cleanedText = config.value.transcriptStyle == 'cleaned'
-        ? analysis.cleanedText
-        : transcript;
+  @override
+  Future<Note> finalizeNote({
+    required String id,
+    required DateTime createdAt,
+    required String audioPath,
+    required String transcript,
+    required AnalysisResult analysis,
+    String transcriptStyle = 'cleaned',
+  }) async {
+    final cleanedText = transcriptStyle == 'cleaned' ? analysis.cleanedText : transcript;
 
     final note = Note(
       id: id,
-      createdAt: timestamp,
-      updatedAt: timestamp,
+      createdAt: createdAt,
+      updatedAt: createdAt,
       title: analysis.intent.isNotEmpty
           ? analysis.intent
           : _generateFallbackTitle(transcript),
@@ -411,56 +506,57 @@ class AppController extends GetxController
       transcript: transcript,
       intent: analysis.intent,
       bucket: analysis.bucket,
+      contentType: analysis.contentType,
       topics: analysis.topics,
       audioPath: audioPath,
       archived: false,
       isProcessing: false,
     );
 
+
+    final tier = subscription.isPro ? ToolTier.pro : (subscription.isPlus ? ToolTier.plus : ToolTier.free);
+    final toolCtx = ToolContext(
+      planTier: tier,
+      config: config.value,
+      storage: storage,
+    );
+    final nbaCtx = NbaContext(
+      source: NbaSource.note,
+      note: note,
+      text: cleanedText.isNotEmpty ? cleanedText : transcript,
+      trigger: HookTrigger.onNoteCreated,
+      toolContext: toolCtx,
+    );
+    final registry = ActionHookRegistry.instance;
+    final rankedActions = await registry.run(nbaCtx, maxActions: 3, tier: tier);
+
+    final finalNote = note.copyWith(actions: rankedActions.map((ra) => ra.action).toList());
+
     final index = notes.indexWhere((n) => n.id == id);
     if (index != -1) {
-      notes[index] = note;
+      notes[index] = finalNote;
     } else {
-      notes.insert(0, note);
+      notes.insert(0, finalNote);
     }
+
+    final allIndex = _allNotes.indexWhere((n) => n.id == id);
+    if (allIndex != -1) {
+      _allNotes[allIndex] = finalNote;
+    } else {
+      _allNotes.insert(0, finalNote);
+    }
+
     notes.refresh();
     await saveNotes();
-    // Notify native widget of the latest note.
     unawaited(
       WidgetService.updateLastNote(
-        note.title.isNotEmpty ? note.title : note.snippet,
+        finalNote.title.isNotEmpty ? finalNote.title : finalNote.snippet,
       ),
     );
-
-    // ── Background audio upload for Plus/Pro ──────────────────────────
-    unawaited(_uploadAudioInBackground(note));
+    return finalNote;
   }
 
-  /// Uploads audio to Firebase Storage in the background and updates the
-  /// note with the cloud URL. Fire-and-forget — failures are swallowed.
-  Future<void> _uploadAudioInBackground(Note note) async {
-    if (note.audioPath == null || note.audioPath!.isEmpty) return;
-    try {
-      final audioSync = Get.find<AudioSyncService>();
-      final url = await audioSync.uploadAudio(
-        noteId: note.id,
-        localPath: note.audioPath!,
-      );
-      if (url != null) {
-        final updated = note.copyWith(audioUrl: url, updatedAt: DateTime.now());
-        final idx = notes.indexWhere((n) => n.id == note.id);
-        if (idx != -1) {
-          notes[idx] = updated;
-          notes.refresh();
-          await saveNotes();
-        }
-      }
-    } catch (e) {
-      debugPrint('Background audio upload failed: $e');
-    }
-  }
 
-  /// Generates a short, meaningful title from the first few words of a transcript.
   String _generateFallbackTitle(String transcript) {
     final trimmed = transcript.trim();
     if (trimmed.isEmpty) return 'Voice Note';
@@ -473,7 +569,6 @@ class AppController extends GetxController
         : snippet;
     final ellipsis = words.length > maxWords ? '…' : '';
 
-    // Capitalize first letter
     final result = '$title$ellipsis';
     return result[0].toUpperCase() + result.substring(1);
   }
@@ -485,8 +580,9 @@ class AppController extends GetxController
     return destination.path;
   }
 
+  @override
   Future<void> saveNotes() async {
-    await storage.saveNotes(notes.toList());
+    await storage.saveNotes(_allNotes);
     if (subscription.canSync) {
       Get.find<SyncService>().syncToCloud();
     }
@@ -496,32 +592,49 @@ class AppController extends GetxController
     await storage.saveInsightEditions(insightEditions.toList());
   }
 
+  @override
   Future<void> updateNote(Note updated) async {
     final index = notes.indexWhere((note) => note.id == updated.id);
-    if (index == -1) return;
-    notes[index] = updated;
-    notes.refresh();
+    if (index != -1) {
+      notes[index] = updated;
+      notes.refresh();
+    }
+    
+    final allIndex = _allNotes.indexWhere((note) => note.id == updated.id);
+    if (allIndex != -1) {
+      _allNotes[allIndex] = updated;
+    } else {
+      _allNotes.add(updated);
+    }
+    
     if (selectedNote.value?.id == updated.id) {
       selectedNote.value = updated;
     }
     await saveNotes();
   }
 
+  @override
   Future<void> archiveNote(String id) async {
     final index = notes.indexWhere((note) => note.id == id);
-    if (index == -1) return;
-    notes[index] = notes[index].copyWith(
-      archived: true,
-      updatedAt: DateTime.now(),
-    );
-    notes.removeAt(index);
+    if (index != -1) {
+      notes.removeAt(index);
+    }
+    
+    final allIndex = _allNotes.indexWhere((note) => note.id == id);
+    if (allIndex != -1) {
+      _allNotes[allIndex] = _allNotes[allIndex].copyWith(
+        archived: true,
+        updatedAt: DateTime.now(),
+      );
+    }
     await saveNotes();
   }
 
   @override
   Future<void> deleteNote(String id) async {
-    final existing = notes.firstWhereOrNull((note) => note.id == id);
+    final existing = _allNotes.firstWhereOrNull((note) => note.id == id);
     notes.removeWhere((note) => note.id == id);
+    _allNotes.removeWhere((note) => note.id == id);
     await saveNotes();
     if (selectedNote.value?.id == id) {
       selectedNote.value = null;
@@ -535,14 +648,12 @@ class AppController extends GetxController
         }
       } catch (_) {}
     }
-    // Delete from Firestore so it won't come back on sync
     if (subscription.canSync) {
       Get.find<SyncService>().deleteNoteFromCloud(id);
-      // Clean up cloud audio
       if (existing?.audioUrl != null) {
         Get.find<AudioSyncService>().deleteAudio(
           noteId: id,
-          audioUrl: existing!.audioUrl,
+          audioUrl: existing!.audioUrl!,
         );
       }
     }
@@ -558,40 +669,8 @@ class AppController extends GetxController
     await updateNote(updated);
   }
 
-  Future<void> playAudio(Note note) async {
-    try {
-      // 1. Try local file first
-      if (note.audioPath != null && note.audioPath!.isNotEmpty) {
-        final localFile = File(note.audioPath!);
-        if (await localFile.exists()) {
-          await _player.setFilePath(note.audioPath!);
-          await _player.play();
-          return;
-        }
-      }
 
-      // 2. Try downloading from cloud URL
-      if (note.audioUrl != null && note.audioUrl!.isNotEmpty) {
-        final audioSync = Get.find<AudioSyncService>();
-        final localPath = await audioSync.downloadAudio(
-          noteId: note.id,
-          audioUrl: note.audioUrl!,
-        );
-        if (localPath != null) {
-          // Update note with local path to avoid re-downloading
-          final updated = note.copyWith(audioPath: localPath);
-          await updateNote(updated);
-          await _player.setFilePath(localPath);
-          await _player.play();
-          return;
-        }
 
-        // 3. Stream directly from URL as last resort
-        await _player.setUrl(note.audioUrl!);
-        await _player.play();
-      }
-    } catch (_) {}
-  }
 
   Future<String?> pickExportDirectory() async {
     if (Platform.isMacOS || Platform.isWindows) {
@@ -619,7 +698,6 @@ class AppController extends GetxController
     final mdFile = File(p.join(exportDir.path, 'notes.md'));
     await mdFile.writeAsString(md);
 
-    // On mobile: open share sheet so user can save/AirDrop the markdown file
     if (Platform.isIOS || Platform.isAndroid) {
       await SharePlus.instance.share(
         ShareParams(
@@ -633,22 +711,18 @@ class AppController extends GetxController
   }
 
 
-  /// Reloads all in-memory data from local storage.
-  /// Called by SyncService after a sync operation completes.
+  @override
   Future<void> reloadAllData() async {
-    notes.value = (await storage.loadNotes())
-        .where((note) => !note.archived)
-        .toList();
+    _allNotes.clear();
+    _allNotes.addAll(await storage.loadNotes());
+    notes.value = _allNotes.where((note) => !note.archived).toList();
 
-    // After reloading notes, check if selectedNote still exists in the list.
     final selected = selectedNote.value;
     if (selected != null) {
       final refreshed = notes.firstWhereOrNull((n) => n.id == selected.id);
       if (refreshed == null) {
-        // Note was deleted remotely — clear the selection.
         selectedNote.value = null;
       } else if (refreshed != selected) {
-        // Note was updated remotely — refresh the selected view.
         selectedNote.value = refreshed;
       }
     }
@@ -661,6 +735,7 @@ class AppController extends GetxController
   Future<void> clearAll() async {
     await storage.clearAll();
     notes.clear();
+    _allNotes.clear();
     insightEditions.clear();
     todoItems.clear();
     reminders.clear();
@@ -718,10 +793,12 @@ class AppController extends GetxController
     await saveTasks();
   }
 
+  @override
   Future<void> deleteCompletedTasks() async {
     todoItems.removeWhere((item) => item.isCompleted);
     await saveTasks();
   }
+
 
   Future<void> addTask(String title) async {
     final task = TodoItem(
@@ -741,6 +818,8 @@ class AppController extends GetxController
       return item.copyWith(isDismissed: true);
     }).toList();
     await saveReminders();
+    // Cancel the pending OS notification for this reminder
+    unawaited(NotificationService.instance.cancelReminder(id));
   }
 
   @override
@@ -778,45 +857,30 @@ class AppController extends GetxController
 
       insightsUpdateStatus.value = 'Analyzing your notes...';
 
-      // Filter meaningful notes
-      final meaningful = notes.where((note) {
-        final content = note.text.isNotEmpty ? note.text : note.transcript;
-        return content.trim().length >= 10;
-      }).toList();
-
-      if (meaningful.isEmpty) {
-        _notifyError('Your notes don\'t have enough content for analysis yet.');
-        return;
-      }
-
-      final payloadNotes = meaningful.map((note) => {
-        'title': note.title,
-        'text': note.text.isNotEmpty ? note.text : note.transcript,
-        'topics': note.topics,
-        'createdAt': note.createdAt.toIso8601String(),
-      }).toList();
-
       insightsUpdateStatus.value = 'Synthesizing themes...';
       final existingTitles = todoItems.map((t) => t.title).toList();
 
-      // ── Delegate to ai.insights tool (handles Pro vs BYOK internally) ──
+      // ── Delegate to generate_insights skill ──
       final engine = Get.find<EngineController>();
-      final insightsResult = await engine.executeTool(
-        'ai.insights',
-        {
-          'notes': payloadNotes,
+      final skillResult = await engine.executeSkill(
+        'generate_insights',
+        initialVars: {
           'buckets': config.value.buckets,
           'existingTaskTitles': existingTitles,
         },
       );
 
-      if (!insightsResult.success) {
-        _notifyError(insightsResult.error ?? 'Insight generation failed.');
+      if (!skillResult.success) {
+        _notifyError(skillResult.error ?? 'Insight generation failed.');
         return;
       }
 
       insightsUpdateStatus.value = 'Generating insights...';
-      final rawInsights = insightsResult.data as Map<String, dynamic>;
+      final rawInsights = skillResult.variables['insights'] as Map<String, dynamic>?;
+      if (rawInsights == null) {
+        _notifyError('No insights generated.');
+        return;
+      }
       final generated = GeneratedInsights.fromJson(rawInsights);
       generatedInsights.value = generated;
 
@@ -960,6 +1024,12 @@ class AppController extends GetxController
   Future<void> _mergeGeneratedReminders(
     List<Map<String, dynamic>> llmReminders,
   ) async {
+    if (llmReminders.isEmpty) return;
+
+    // Request OS notification permission the first time we create reminders
+    // (avoids the user needing to navigate to the permission screen manually)
+    await NotificationService.instance.requestPermission();
+
     for (final data in llmReminders) {
       final title = (data['title'] as String? ?? '').trim();
       if (title.isEmpty) continue;
@@ -984,6 +1054,10 @@ class AppController extends GetxController
           date: date,
           time: data['time'] as String?,
         ),
+      );
+      // Schedule OS-level notification for this LLM-generated reminder
+      unawaited(
+        NotificationService.instance.scheduleReminder(reminders.last),
       );
     }
     await saveReminders();
@@ -1241,17 +1315,71 @@ class AppController extends GetxController
     return buffer.toString();
   }
 
+  Timer? _reminderTimer;
+
   @override
   void onInit() {
     super.onInit();
     WidgetsBinding.instance.addObserver(this);
+    _reminderTimer = Timer.periodic(const Duration(minutes: 1), (_) => _checkReminders());
   }
 
   @override
   void onClose() {
+    _reminderTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _player.dispose();
     super.onClose();
+  }
+
+  Future<void> _checkReminders() async {
+    final now = DateTime.now();
+    bool changed = false;
+
+    for (int i = 0; i < reminders.length; i++) {
+      final r = reminders[i];
+      if (r.isDismissed || r.isNotified) continue;
+
+      DateTime due = r.date;
+      if (r.time != null && r.time!.isNotEmpty) {
+        try {
+          final parts = r.time!.split(':');
+          if (parts.length >= 2) {
+            final h = int.parse(parts[0]);
+            final m = int.parse(parts[1]);
+            due = DateTime(r.date.year, r.date.month, r.date.day, h, m);
+          }
+        } catch (_) {}
+      }
+
+      if (now.isAfter(due) || now.isAtSameMomentAs(due)) {
+        try {
+          final engine = Get.find<EngineController>();
+          
+          await engine.executeTool('notify.in_app', {
+            'title': 'Reminder: ${r.title}',
+            'type': 'info',
+          });
+          
+          if (subscription.isPlus || subscription.isPro) {
+            await engine.executeTool('notify.push', {
+              'title': 'Reminder',
+              'body': r.title,
+            });
+          }
+        } catch (e) {
+          debugPrint('Notification failed for reminder: $e');
+        }
+        
+        reminders[i] = r.copyWith(isNotified: true);
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      reminders.refresh();
+      await saveReminders();
+    }
   }
 
   @override

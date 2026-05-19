@@ -2,8 +2,8 @@
 library;
 
 import 'package:get/get.dart';
+import 'package:fikr/tools/app_state_resolver.dart';
 
-import '../../controllers/app_controller.dart';
 import '../../services/audio_sync_service.dart';
 import '../tool_interface.dart';
 
@@ -44,7 +44,7 @@ class AudioPlayTool extends FikrTool {
     ToolContext context,
   ) async {
     try {
-      final ctrl = Get.find<AppController>();
+      final ctrl = appState();
       final noteId = params['noteId'] as String;
       final note = ctrl.notes.firstWhereOrNull((n) => n.id == noteId);
       if (note == null) return ToolResult.fail('Note not found: $noteId');

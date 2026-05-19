@@ -54,8 +54,9 @@ class FirebaseService {
         'allowed_models':
             '{"chat": ["gemini-2.0-flash"], "transcription": ["gemini-2.0-flash"]}',
         'byok_models': '{'
-            '"google": {"transcription": "gemini-2.0-flash", "analysis": "gemini-2.0-flash"},'
-            '"openai": {"transcription": "whisper-1", "analysis": "gpt-4o"}'
+            '"google": {"transcription": "gemini-2.0-flash", "analysis": "gemini-2.0-flash", "vision": "gemini-2.0-flash"},'
+            '"openai": {"transcription": "whisper-1", "analysis": "gpt-4o", "vision": "gpt-4o"},'
+            '"openRouter": {"transcription": "openai/whisper-large-v3", "analysis": "google/gemini-2.0-flash-lite-001", "vision": "google/gemini-2.0-flash-lite-001"}'
             '}',
       });
       await _remoteConfig.fetchAndActivate();
@@ -171,34 +172,42 @@ class FirebaseService {
   }
 
   /// Returns the remote-configured models for BYOK users.
-  /// Structure: { "google": { "transcription": "...", "analysis": "..." }, "openai": { ... } }
-  /// Falls back to provider hardcoded defaults if Remote Config isn't available.
-  ({String transcription, String analysis}) getByokModels(LLMProviderType type) {
+  /// Falls back to preset defaults (kPresetModels) if Remote Config is unavailable.
+  ({String transcription, String analysis, String vision}) getByokModels(LLMProviderType type) {
+    final fallbackTranscription = kPresetModels['transcription']?[type] ?? '';
+    final fallbackAnalysis      = kPresetModels['analysis']?[type]      ?? '';
+    final fallbackVision        = kPresetModels['vision']?[type]        ?? '';
+
     if (!_initialized) {
       return (
-        transcription: type.fallbackTranscriptionModel,
-        analysis: type.fallbackAnalysisModel,
+        transcription: fallbackTranscription,
+        analysis:      fallbackAnalysis,
+        vision:        fallbackVision,
       );
     }
     try {
       final jsonString = _remoteConfig.getString('byok_models');
       final decoded = jsonDecode(jsonString) as Map<String, dynamic>;
-      final providerConfig = decoded[type.name] as Map<String, dynamic>?;
+      final providerKey = type == LLMProviderType.gemini ? 'gemini' : type.name;
+      final providerConfig = decoded[providerKey] as Map<String, dynamic>?;
       if (providerConfig == null) {
         return (
-          transcription: type.fallbackTranscriptionModel,
-          analysis: type.fallbackAnalysisModel,
+          transcription: fallbackTranscription,
+          analysis:      fallbackAnalysis,
+          vision:        fallbackVision,
         );
       }
       return (
-        transcription: providerConfig['transcription'] as String? ?? type.fallbackTranscriptionModel,
-        analysis: providerConfig['analysis'] as String? ?? type.fallbackAnalysisModel,
+        transcription: providerConfig['transcription'] as String? ?? fallbackTranscription,
+        analysis:      providerConfig['analysis']      as String? ?? fallbackAnalysis,
+        vision:        providerConfig['vision']        as String? ?? fallbackVision,
       );
     } catch (e) {
       debugPrint('FirebaseService.getByokModels: $e');
       return (
-        transcription: type.fallbackTranscriptionModel,
-        analysis: type.fallbackAnalysisModel,
+        transcription: fallbackTranscription,
+        analysis:      fallbackAnalysis,
+        vision:        fallbackVision,
       );
     }
   }

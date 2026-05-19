@@ -3,7 +3,7 @@ import 'package:flutter_feather_icons/flutter_feather_icons.dart';
 import 'package:get/get.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../../../controllers/app_controller.dart';
+import 'package:fikr/controllers/app_controller.dart';
 import '../../../models/llm_provider.dart';
 import '../../../services/openai_service.dart';
 import '../../../services/toast_service.dart';
@@ -20,7 +20,7 @@ class _ProviderSetupDialogState extends State<ProviderSetupDialog> {
   final _keyController = TextEditingController();
   bool _isLoading = false;
   bool _isValid = false;
-  LLMProviderType _selectedType = LLMProviderType.google;
+  LLMProviderType _selectedType = LLMProviderType.gemini;
 
   @override
   void initState() {
@@ -28,8 +28,14 @@ class _ProviderSetupDialogState extends State<ProviderSetupDialog> {
     _keyController.addListener(_validate);
   }
 
+  @override
+  void dispose() {
+    _keyController.dispose();
+    super.dispose();
+  }
+
   void _validate() {
-    final isValid = _keyController.text.trim().isNotEmpty;
+    final bool isValid = _keyController.text.trim().isNotEmpty;
     if (isValid != _isValid) {
       setState(() => _isValid = isValid);
     }
@@ -39,8 +45,10 @@ class _ProviderSetupDialogState extends State<ProviderSetupDialog> {
     switch (type) {
       case LLMProviderType.openai:
         return 'sk-...';
-      case LLMProviderType.google:
+      case LLMProviderType.gemini:
         return 'AIza...';
+      case LLMProviderType.openrouter:
+        return 'sk-or-v1-...';
     }
   }
 
@@ -48,8 +56,10 @@ class _ProviderSetupDialogState extends State<ProviderSetupDialog> {
     switch (type) {
       case LLMProviderType.openai:
         return 'https://platform.openai.com/api-keys';
-      case LLMProviderType.google:
+      case LLMProviderType.gemini:
         return 'https://aistudio.google.com/app/apikey';
+      case LLMProviderType.openrouter:
+        return 'https://openrouter.ai/keys';
     }
   }
 
@@ -57,8 +67,10 @@ class _ProviderSetupDialogState extends State<ProviderSetupDialog> {
     switch (type) {
       case LLMProviderType.openai:
         return 'ChatGPT & Whisper';
-      case LLMProviderType.google:
+      case LLMProviderType.gemini:
         return 'Recommended · Free to start';
+      case LLMProviderType.openrouter:
+        return 'Access 200+ models · Vision capable · BYOK';
     }
   }
 
@@ -66,8 +78,10 @@ class _ProviderSetupDialogState extends State<ProviderSetupDialog> {
     switch (type) {
       case LLMProviderType.openai:
         return FeatherIcons.cpu;
-      case LLMProviderType.google:
+      case LLMProviderType.gemini:
         return Icons.g_mobiledata;
+      case LLMProviderType.openrouter:
+        return FeatherIcons.cloud;
     }
   }
 
@@ -153,11 +167,7 @@ class _ProviderSetupDialogState extends State<ProviderSetupDialog> {
     }
   }
 
-  @override
-  void dispose() {
-    _keyController.dispose();
-    super.dispose();
-  }
+
 
   @override
   Widget build(BuildContext context) {

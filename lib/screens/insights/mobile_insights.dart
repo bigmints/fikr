@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_feather_icons/flutter_feather_icons.dart';
 import 'package:get/get.dart';
-import '../../controllers/app_controller.dart';
+import 'package:fikr/controllers/app_controller.dart';
 import '../../controllers/theme_controller.dart';
 import '../../utils/app_spacing.dart';
 import 'reminders_screen.dart';

@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:just_audio/just_audio.dart';
-import '../../controllers/app_controller.dart';
+import 'package:fikr/controllers/app_controller.dart';
 import '../../models/note.dart';
 import '../../services/audio_sync_service.dart';
 

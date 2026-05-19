@@ -2,24 +2,26 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_feather_icons/flutter_feather_icons.dart';
 import 'package:get/get.dart';
-import 'package:fikr/screens/insights_screen.dart';
-import 'package:fikr/screens/new_home_screen.dart';
-import 'package:fikr/screens/settings_screen.dart';
-import 'package:fikr/screens/settings/widgets/provider_setup_dialog.dart';
-import 'package:fikr/screens/tasks/tasks_screen.dart';
-import 'package:fikr/screens/shells/desktop_shell.dart';
-import 'package:fikr/screens/shells/mobile_shell.dart';
-import 'package:fikr/screens/insights/widgets/insight_dialogs.dart';
-import 'package:fikr/screens/insights/insights_history_screen.dart';
+import 'insights_screen.dart';
+import 'new_home_screen.dart';
+import 'settings_screen.dart';
+import 'settings/widgets/provider_setup_dialog.dart';
+import 'tasks/tasks_screen.dart';
+import 'shells/desktop_shell.dart';
+import 'shells/mobile_shell.dart';
+import 'insights/widgets/insight_dialogs.dart';
+import 'insights/insights_history_screen.dart';
 
 import '../utils/layout.dart';
 
-import '../controllers/app_controller.dart';
+import 'package:fikr/controllers/app_controller.dart';
 import '../controllers/navigation_controller.dart';
 import '../controllers/record_controller.dart';
 
 class HomeShell extends StatelessWidget {
-  HomeShell({super.key});
+  HomeShell({super.key, required this.appController});
+
+  final AppController appController;
 
   final NavigationController navController = Get.put(NavigationController());
   final RecordController recordController = Get.put(RecordController());
@@ -78,7 +80,6 @@ class HomeShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final appController = Get.find<AppController>();
     return LayoutBuilder(
       builder: (context, constraints) {
         final wide = isDesktopConstraints(constraints);

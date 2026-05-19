@@ -1,10 +1,14 @@
+import 'dart:io';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:get/get.dart';
 
 import '../models/note.dart';
+import '../models/scan.dart';
 import '../models/insights_models.dart';
 import '../models/llm_provider.dart';
 import '../controllers/app_controller.dart';
@@ -19,9 +23,66 @@ import 'audio_sync_service.dart';
 /// same-account re-login vs account switches.
 const _kLastSyncedUserKey = 'last_synced_user_id';
 
+/// Removes characters that Firestore rejects with "string contains invalid characters":
+///   • Null bytes (U+0000)
+///   • C0 control characters (except \t, \n, \r which are valid in text)
+///   • Lone Unicode surrogates (U+D800–U+DFFF) — valid in Dart Strings but
+///     illegal in Firestore's UTF-8 storage layer
+/// Also truncates at 500 KB to stay well under Firestore's 1 MiB field limit.
+String _sanitizeString(String s) {
+  // 1. Remove null bytes — the most common cause
+  var cleaned = s.replaceAll('\x00', '');
+
+  // 2. Remove C0 control characters (keep \t=0x09, \n=0x0A, \r=0x0D)
+  cleaned = cleaned.replaceAll(RegExp(r'[\x01-\x08\x0B\x0C\x0E-\x1F\x7F]'), '');
+
+  // 3. Strip lone Unicode surrogates (U+D800–U+DFFF).
+  //    Firestore's protobuf layer requires valid UTF-8; surrogates are not.
+  //    Dart strings can hold lone surrogates as code units, so we must check
+  //    rune-by-rune and rebuild the string without them.
+  final hasSurrogate = cleaned.codeUnits.any((u) => u >= 0xD800 && u <= 0xDFFF);
+  if (hasSurrogate) {
+    final buf = StringBuffer();
+    for (final codeUnit in cleaned.codeUnits) {
+      if (codeUnit < 0xD800 || codeUnit > 0xDFFF) {
+        buf.writeCharCode(codeUnit);
+      }
+    }
+    cleaned = buf.toString();
+  }
+
+  // 4. Truncate at 500 KB (Firestore max field is ~1 MiB)
+  if (cleaned.length > 500000) {
+    cleaned = cleaned.substring(0, 500000);
+  }
+  return cleaned;
+}
+
+/// Recursively sanitizes all string values in a JSON-like map.
+/// Lists of strings are also sanitized element-by-element.
+Map<String, dynamic> _sanitizeMap(Map<String, dynamic> data) {
+  return data.map((key, value) {
+    if (value is String) return MapEntry(key, _sanitizeString(value));
+    if (value is List) {
+      return MapEntry(
+        key,
+        value.map((e) => e is String ? _sanitizeString(e) : e).toList(),
+      );
+    }
+    if (value is Map<String, dynamic>) return MapEntry(key, _sanitizeMap(value));
+    return MapEntry(key, value);
+  });
+}
+
 class SyncService extends GetxService {
   final StorageService _storage = Get.find<StorageService>();
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  /// Named Firestore database for Flutter app data.
+  /// Uses 'prod-fikr' in release builds and 'dev-fikr' in debug/profile.
+  /// Per architecture doc: no app data lives in the (default) database.
+  final FirebaseFirestore _firestore = FirebaseFirestore.instanceFor(
+    app: FirebaseFirestore.instance.app,
+    databaseId: kReleaseMode ? 'prod-fikr' : 'dev-fikr',
+  );
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FlutterSecureStorage _prefs = const FlutterSecureStorage();
 
@@ -160,6 +221,10 @@ class SyncService extends GetxService {
 
     final userRef = _firestore.collection('users').doc(user.uid);
 
+    // Snapshot of the previous sync time — items missing from cloud that were
+    // last modified BEFORE this time were deleted on another device/Firestore.
+    final prevSyncTime = lastSyncTime.value;
+
     // Pull cloud notes & insights
     final cloudNotesSnap = await userRef.collection('notes').get();
     final cloudNotes = cloudNotesSnap.docs
@@ -181,31 +246,103 @@ class SyncService extends GetxService {
         .map((d) => ReminderItem.fromJson(d.data()))
         .toList();
 
-    // Load local data
-    final localNotes = await _storage.loadNotes();
-    final localInsights = await _storage.loadInsightEditions();
-    final localTasks = await _storage.loadTasks();
-    final localReminders = await _storage.loadReminders();
+    final cloudScansSnap = await userRef.collection('scans').get();
+    final cloudScans = cloudScansSnap.docs
+        .map((d) => Scan.fromJson(d.data()))
+        .toList();
 
-    // Merge (newer wins)
-    final mergedNotes = _mergeNotes(localNotes, cloudNotes);
-    final mergedInsights = _mergeInsights(localInsights, cloudInsights);
-    final mergedTasks = _mergeTasks(localTasks, cloudTasks);
-    final mergedReminders = _mergeReminders(localReminders, cloudReminders);
+    // Build cloud ID sets for deletion detection
+    final cloudNoteIds     = {for (final n in cloudNotes)     n.id};
+    final cloudInsightIds  = {for (final i in cloudInsights)  i.id};
+    final cloudTaskIds     = {for (final t in cloudTasks)     t.id};
+    final cloudReminderIds = {for (final r in cloudReminders) r.id};
+    final cloudScanIds     = {for (final s in cloudScans)     s.id};
+
+    // Load local data
+    final localNotes     = await _storage.loadNotes();
+    final localInsights  = await _storage.loadInsightEditions();
+    final localTasks     = await _storage.loadTasks();
+    final localReminders = await _storage.loadReminders();
+    final localScans     = await _storage.loadScans();
+
+    // ── Deletion propagation (cloud-deleted → remove locally) ──────────
+    // An item is treated as cloud-deleted when ALL of:
+    //   • It is absent from Firestore, AND
+    //   • It was last modified BEFORE the previous sync completed
+    //     (so it existed on the server during the last sync and was
+    //      removed since then — not a brand-new local item).
+    List<Note>           filteredLocalNotes     = localNotes;
+    List<InsightEdition> filteredLocalInsights  = localInsights;
+    List<TodoItem>       filteredLocalTasks     = localTasks;
+    List<ReminderItem>   filteredLocalReminders = localReminders;
+    List<Scan>           filteredLocalScans     = localScans;
+
+    if (prevSyncTime != null) {
+      filteredLocalNotes = localNotes.where((n) {
+        if (cloudNoteIds.contains(n.id)) return true;
+        if (n.updatedAt.isAfter(prevSyncTime)) return true; // new local note
+        return false; // absent from cloud & predates last sync → cloud-deleted
+      }).toList();
+
+      filteredLocalInsights = localInsights.where((i) {
+        if (cloudInsightIds.contains(i.id)) return true;
+        if (i.createdAt.isAfter(prevSyncTime)) return true;
+        return false;
+      }).toList();
+
+      filteredLocalTasks = localTasks.where((t) {
+        if (cloudTaskIds.contains(t.id)) return true;
+        if (t.createdAt.isAfter(prevSyncTime)) return true;
+        return false;
+      }).toList();
+
+      filteredLocalReminders = localReminders.where((r) {
+        if (cloudReminderIds.contains(r.id)) return true;
+        if (r.date.isAfter(prevSyncTime)) return true;
+        return false;
+      }).toList();
+
+      filteredLocalScans = localScans.where((s) {
+        if (cloudScanIds.contains(s.id)) return true;
+        if (s.updatedAt.isAfter(prevSyncTime)) return true;
+        return false;
+      }).toList();
+
+      final dn = localNotes.length     - filteredLocalNotes.length;
+      final di = localInsights.length  - filteredLocalInsights.length;
+      final dt = localTasks.length     - filteredLocalTasks.length;
+      final dr = localReminders.length - filteredLocalReminders.length;
+      final ds = localScans.length     - filteredLocalScans.length;
+      if (dn + di + dt + dr + ds > 0) {
+        debugPrint(
+          'Sync: Deletion propagation — removed locally: '
+          'notes=$dn, insights=$di, tasks=$dt, reminders=$dr, scans=$ds',
+        );
+      }
+    }
+
+    // Merge — newer wins; _mergeNotes also filters garbage Studio notes
+    final mergedNotes     = _mergeNotes(filteredLocalNotes, cloudNotes);
+    final mergedInsights  = _mergeInsights(filteredLocalInsights, cloudInsights);
+    final mergedTasks     = _mergeTasks(filteredLocalTasks, cloudTasks);
+    final mergedReminders = _mergeReminders(filteredLocalReminders, cloudReminders);
+    final mergedScans     = _mergeScans(filteredLocalScans, cloudScans);
 
     // Save merged locally
     await _storage.saveNotes(mergedNotes);
     await _storage.saveInsightEditions(mergedInsights);
     await _storage.saveTasks(mergedTasks);
     await _storage.saveReminders(mergedReminders);
+    await _storage.saveScans(mergedScans);
 
-    // Download missing audio files in the background
+    // Download missing audio/images in the background
     _downloadMissingAudioForNotes(mergedNotes);
+    _downloadMissingImagesForScans(mergedScans);
 
     // Push merged to cloud (includes API key push)
     await syncToCloud();
 
-    // Also pull any remote keys we might be missing locally
+    // Pull any remote keys we might be missing locally
     await _pullRemoteApiKeys();
 
     debugPrint(
@@ -241,13 +378,21 @@ class SyncService extends GetxService {
         .map((d) => ReminderItem.fromJson(d.data()))
         .toList();
 
+    final cloudScansSnap = await userRef.collection('scans').get();
+    final cloudScans = cloudScansSnap.docs
+        .map((d) => Scan.fromJson(d.data()))
+        .toList();
+
     await _storage.saveNotes(cloudNotes);
     await _storage.saveInsightEditions(cloudInsights);
     await _storage.saveTasks(cloudTasks);
     await _storage.saveReminders(cloudReminders);
+    await _storage.saveScans(cloudScans);
 
     // Download missing audio files in the background
     _downloadMissingAudioForNotes(cloudNotes);
+    // Download missing scan images in the background (Plus/Pro — Free has no imageUrl)
+    _downloadMissingImagesForScans(cloudScans);
 
     // Pull API keys from fikr.one into local secure storage (Plus/Pro only)
     await _pullRemoteApiKeys();
@@ -268,6 +413,7 @@ class SyncService extends GetxService {
     await _storage.saveInsightEditions([]);
     await _storage.saveTasks([]);
     await _storage.saveReminders([]);
+    await _storage.saveScans([]);
   }
 
   // ── Refresh in-memory AppController lists ──────────────────────────
@@ -300,14 +446,94 @@ class SyncService extends GetxService {
     }
   }
 
+  // ── Image download for synced scans ─────────────────────────────────
+
+  /// Downloads scan images from Firebase Storage for scans that have a cloud
+  /// [imageUrl] but no valid local [imagePath]. Mirrors audio download pattern.
+  ///
+  /// Free users never have [imageUrl] set, so this is a no-op for them.
+  /// Runs as fire-and-forget background work after bidirectional merge or pull.
+  void _downloadMissingImagesForScans(List<Scan> scans) {
+    final toDownload = scans.where((s) {
+      if (s.imageUrl == null || s.imageUrl!.isEmpty) return false;
+      // Skip if local file already exists
+      if (s.imagePath != null && s.imagePath!.isNotEmpty) {
+        final local = File(s.imagePath!);
+        if (local.existsSync()) return false;
+      }
+      return true;
+    }).toList();
+
+    if (toDownload.isEmpty) return;
+
+    debugPrint('SyncService: Downloading images for ${toDownload.length} scans...');
+
+    for (final scan in toDownload) {
+      _downloadScanImage(scan).catchError((e) {
+        debugPrint('SyncService: Failed to download image for scan ${scan.id}: $e');
+      });
+    }
+  }
+
+  /// Downloads a single scan image from its [imageUrl] and saves it locally.
+  /// Updates the [Scan] record in local storage with the new [imagePath].
+  Future<void> _downloadScanImage(Scan scan) async {
+    try {
+      final url = scan.imageUrl!;
+      final ext = url.contains('.png') ? 'png' : 'jpg';
+
+      // Derive a stable local path from the scan id
+      final localPath = '${_storage.audioDirPath}/scan_${scan.id}.$ext';
+      final localFile = File(localPath);
+      if (localFile.existsSync()) return; // already downloaded
+
+      final httpClient = HttpClient();
+      final req = await httpClient.getUrl(Uri.parse(url));
+      final response = await req.close();
+      if (response.statusCode != 200) return;
+
+      final bytes = await response.fold<List<int>>(
+        [],
+        (acc, chunk) => acc..addAll(chunk),
+      );
+      await localFile.writeAsBytes(bytes);
+      debugPrint('[SyncService] Downloaded scan image: $localPath (${bytes.length} bytes)');
+
+      // Update the scan's imagePath in local storage
+      final localScans = await _storage.loadScans();
+      final updated = scan.copyWith(imagePath: localPath, updatedAt: DateTime.now());
+      final updatedScans = localScans.map((s) => s.id == scan.id ? updated : s).toList();
+      await _storage.saveScans(updatedScans);
+    } catch (e) {
+      debugPrint('[SyncService] _downloadScanImage error: $e');
+    }
+  }
+
+
   // ── Merge helpers ──────────────────────────────────────────────────
+
+  /// Returns true for notes that were leaked by the old Fikr Studio
+  /// Two-Way Sync or its error-catch blocks. These should never appear
+  /// in the personal Fikr notes collection.
+  static bool _isGarbageNote(Note note) {
+    const patterns = [
+      'executeMcp error:',
+      'Failed to updateDoc!',
+      'Failed to updateDoc notification!',
+    ];
+    final t = note.text.trimLeft();
+    final tr = note.transcript.trimLeft();
+    return patterns.any((p) => t.startsWith(p) || tr.startsWith(p));
+  }
 
   List<Note> _mergeNotes(List<Note> local, List<Note> cloud) {
     final Map<String, Note> merged = {};
     for (final note in local) {
+      if (_isGarbageNote(note)) continue; // drop Studio pollution from local
       merged[note.id] = note;
     }
     for (final cloudNote in cloud) {
+      if (_isGarbageNote(cloudNote)) continue; // drop Studio pollution from cloud
       final existing = merged[cloudNote.id];
       if (existing == null || cloudNote.updatedAt.isAfter(existing.updatedAt)) {
         merged[cloudNote.id] = cloudNote;
@@ -362,6 +588,23 @@ class SyncService extends GetxService {
     return merged.values.toList();
   }
 
+  List<Scan> _mergeScans(
+    List<Scan> local,
+    List<Scan> cloud,
+  ) {
+    final Map<String, Scan> merged = {};
+    for (final scan in local) {
+      merged[scan.id] = scan;
+    }
+    for (final cloudScan in cloud) {
+      final existing = merged[cloudScan.id];
+      if (existing == null || cloudScan.updatedAt.isAfter(existing.updatedAt)) {
+        merged[cloudScan.id] = cloudScan;
+      }
+    }
+    return merged.values.toList();
+  }
+
   // ── Public: push to cloud ──────────────────────────────────────────
 
   /// Delete a specific note from Firestore so it won't come back on sync.
@@ -382,6 +625,7 @@ class SyncService extends GetxService {
   }
 
   Future<void> syncToCloud() async {
+    debugPrint('SyncToCloud: START');
     try {
       final user = _auth.currentUser;
       if (user == null) {
@@ -392,66 +636,118 @@ class SyncService extends GetxService {
       debugPrint('SyncToCloud: Pushing data for ${user.uid}');
 
       final subController = Get.find<SubscriptionController>();
+      debugPrint('SyncToCloud: tier=${subController.currentTier.value.name}, canSync=${subController.canSync}');
       if (!subController.canSync) {
-        debugPrint('SyncToCloud: Current tier does not support sync.');
+        debugPrint('SyncToCloud: Tier does not support sync — aborting.');
+        syncError.value = 'Sync unavailable on current plan (${subController.currentTier.value.name}). Ensure you are logged in as Pro.';
         return;
       }
 
-      final notes = await _storage.loadNotes();
-      final insights = await _storage.loadInsightEditions();
-      final tasks = await _storage.loadTasks();
+      final notes     = await _storage.loadNotes();
+      final insights  = await _storage.loadInsightEditions();
+      final tasks     = await _storage.loadTasks();
       final reminders = await _storage.loadReminders();
-      final config = await _storage.loadConfig();
+      final scans     = await _storage.loadScans();
+      final config    = await _storage.loadConfig();
+      debugPrint(
+        'SyncToCloud: Loaded — '
+        'notes=${notes.length}, insights=${insights.length}, '
+        'tasks=${tasks.length}, reminders=${reminders.length}, '
+        'scans=${scans.length}. Total writes estimate: '
+        '${notes.length + insights.length + tasks.length + reminders.length + scans.length + 1}',
+      );
 
-      final batch = _firestore.batch();
       final userRef = _firestore.collection('users').doc(user.uid);
 
-      // Notes
+      // Firestore hard-caps a WriteBatch at 500 operations.
+      // _ChunkedBatch auto-flushes every 400 writes to stay safely under the limit
+      // and avoid INVALID_ARGUMENT errors on large datasets.
+      final writer = _ChunkedBatch(_firestore);
+
+      // Notes — sanitize all string fields to prevent Firestore
+      // "string contains invalid characters" errors from null bytes in transcripts.
+      // Also skip any Studio error-message notes that leaked into local storage.
       for (final note in notes) {
-        batch.set(
+        if (note.isProcessing) continue;
+        if (note.id.isEmpty) {
+          debugPrint('SyncToCloud: Skipping note with empty id (corrupt record)');
+          continue;
+        }
+        if (_isGarbageNote(note)) {
+          debugPrint('SyncToCloud: Skipping garbage note ${note.id}');
+          continue;
+        }
+        writer.set(
           userRef.collection('notes').doc(note.id),
-          note.toJson(),
-          SetOptions(merge: true),
+          _sanitizeMap(note.toJson()),
         );
       }
 
       // Insights
       for (final edition in insights) {
-        batch.set(
+        if (edition.id.isEmpty) {
+          debugPrint('SyncToCloud: Skipping insight with empty id (corrupt record)');
+          continue;
+        }
+        writer.set(
           userRef.collection('insights').doc(edition.id),
-          edition.toJson(),
-          SetOptions(merge: true),
+          _sanitizeMap(edition.toJson()),
         );
       }
 
       // Tasks
       for (final task in tasks) {
-        batch.set(
+        if (task.id.isEmpty) {
+          debugPrint('SyncToCloud: Skipping task with empty id (corrupt record)');
+          continue;
+        }
+        writer.set(
           userRef.collection('tasks').doc(task.id),
-          task.toJson(),
-          SetOptions(merge: true),
+          _sanitizeMap(task.toJson()),
         );
       }
 
       // Reminders
       for (final reminder in reminders) {
-        batch.set(
+        if (reminder.id.isEmpty) {
+          debugPrint('SyncToCloud: Skipping reminder with empty id (corrupt record)');
+          continue;
+        }
+        writer.set(
           userRef.collection('reminders').doc(reminder.id),
-          reminder.toJson(),
-          SetOptions(merge: true),
+          _sanitizeMap(reminder.toJson()),
         );
       }
 
-      // User document — only write safe fields; 'plan' is owned by fikr.one backend
-      batch.set(userRef, {
+      // Scans
+      for (final scan in scans) {
+        if (scan.id.isEmpty) {
+          debugPrint('SyncToCloud: Skipping scan with empty id (corrupt record)');
+          continue;
+        }
+        writer.set(
+          userRef.collection('scans').doc(scan.id),
+          _sanitizeMap(scan.toJson()),
+        );
+      }
+
+      // User root document — only safe fields; 'plan' is owned by fikr.one Admin SDK
+      writer.setRaw(userRef, {
         'email': user.email,
         'config': config.toJson(),
         'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      });
 
-      await batch.commit();
+      await writer.commit();
 
-      // Push API keys to fikr.one (Plus/Pro only — server enforces plan)
+      debugPrint(
+        'SyncToCloud: Committed ${writer.totalWrites} writes '
+        'across ${writer.totalBatches} batch(es). '
+        'Notes: ${notes.length}, Insights: ${insights.length}, '
+        'Tasks: ${tasks.length}, Reminders: ${reminders.length}',
+      );
+
+      // Push API keys to fikr.one (Plus/Pro — server enforces plan)
       await _pushLocalApiKeys(config);
 
       // Persist this user ID as the last synced account
@@ -459,19 +755,28 @@ class SyncService extends GetxService {
 
       lastSyncTime.value = DateTime.now();
       syncError.value = '';
-      debugPrint('SyncToCloud: Complete.');
-    } catch (e) {
-      debugPrint('SyncToCloud Error: $e');
-      syncError.value = e.toString();
+    } catch (e, st) {
+      // Log the FULL error and stack so it appears in Xcode/device console.
+      // This is the only way to diagnose failures in the production binary.
+      debugPrint('═══════════════════════════════════════');
+      debugPrint('SyncToCloud FAILED');
+      debugPrint('Error type : ${e.runtimeType}');
+      debugPrint('Error      : $e');
+      debugPrint('Stack      : $st');
+      debugPrint('═══════════════════════════════════════');
+      syncError.value = '${e.runtimeType}: $e';
       if (Get.context != null) {
         ToastService.showError(
           Get.context!,
           title: 'Sync Failed',
-          description: 'Could not backup data. Please try again.',
+          description: e.toString().length > 80
+              ? '${e.toString().substring(0, 80)}…'
+              : e.toString(),
         );
       }
     }
   }
+
 
   // ── API Key sync helpers ────────────────────────────────────────────
 
@@ -567,5 +872,72 @@ class SyncService extends GetxService {
     if (user != null && !user.isAnonymous) {
       await _handleLogin(user);
     }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// _ChunkedBatch — Firestore batch writer that auto-flushes at 400 ops
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Wraps Firestore batched writes and auto-commits every [_maxPerBatch]
+/// operations so callers never hit the Firestore 500-op hard limit.
+///
+/// Usage:
+///   final writer = _ChunkedBatch(firestore);
+///   writer.set(ref, data);           // subcollection docs (merge: true)
+///   writer.setRaw(userRef, topData); // root user doc (merge: true, no sanitize)
+///   await writer.commit();           // flushes any remaining writes
+class _ChunkedBatch {
+  _ChunkedBatch(this._firestore);
+
+  final FirebaseFirestore _firestore;
+
+  static const int _maxPerBatch = 400;
+
+  WriteBatch _current = FirebaseFirestore.instance.batch();
+  int _currentCount   = 0;
+  int _totalWrites    = 0;
+  int _totalBatches   = 0;
+
+  int get totalWrites  => _totalWrites;
+  int get totalBatches => _totalBatches;
+
+  /// Queues a merge-set for a subcollection document.
+  void set(DocumentReference ref, Map<String, dynamic> data) {
+    _current.set(ref, data, SetOptions(merge: true));
+    _currentCount++;
+    _totalWrites++;
+    if (_currentCount >= _maxPerBatch) {
+      _pendingBatches.add(_current);
+      _current      = _firestore.batch();
+      _currentCount = 0;
+    }
+  }
+
+  /// Queues a merge-set for the root user document (no JSON sanitization).
+  void setRaw(DocumentReference ref, Map<String, dynamic> data) {
+    _current.set(ref, data, SetOptions(merge: true));
+    _currentCount++;
+    _totalWrites++;
+    if (_currentCount >= _maxPerBatch) {
+      _pendingBatches.add(_current);
+      _current      = _firestore.batch();
+      _currentCount = 0;
+    }
+  }
+
+  final List<WriteBatch> _pendingBatches = [];
+
+  /// Commits all queued batches sequentially.
+  Future<void> commit() async {
+    // Add the last partial batch if it has any writes
+    if (_currentCount > 0) {
+      _pendingBatches.add(_current);
+    }
+    _totalBatches = _pendingBatches.length;
+    for (final batch in _pendingBatches) {
+      await batch.commit();
+    }
+    _pendingBatches.clear();
   }
 }

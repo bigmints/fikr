@@ -92,7 +92,7 @@ Skill generateInsightsSkill() => Skill(
         // Step 0: List recent notes (passed via initialVars)
         const SkillStep(
           toolName: 'notes.list',
-          input: {'sort': 'newest', 'limit': 50},
+          input: {'sort': 'newest', 'limit': 50, 'minTextLength': 10},
           outputKey: 'notesList',
         ),
         // Step 1: Generate insights from notes

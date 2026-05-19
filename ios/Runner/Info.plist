@@ -4,6 +4,8 @@
 	<dict>
 		<key>CADisableMinimumFrameDurationOnPhone</key>
 		<true/>
+		<key>FirebaseAppDelegateProxyEnabled</key>
+		<false/>
 		<key>CFBundleDevelopmentRegion</key>
 		<string>$(DEVELOPMENT_LANGUAGE)</string>
 		<key>CFBundleDisplayName</key>
@@ -28,8 +30,12 @@
 		<true/>
 		<key>NSMicrophoneUsageDescription</key>
 		<string>Fikr needs microphone access to record your voice notes for AI-powered transcription and analysis.</string>
+		<key>NSCameraUsageDescription</key>
+		<string>Fikr needs camera access to capture photos for AI-powered analysis and insights.</string>
 		<key>NSPhotoLibraryUsageDescription</key>
 		<string>Fikr needs photo library access to save or attach images to your notes.</string>
+		<key>NSContactsUsageDescription</key>
+		<string>Fikr needs contacts access to add new contacts from your actions.</string>
 		<key>UIApplicationSupportsIndirectInputEvents</key>
 		<true/>
 		<key>UILaunchStoryboardName</key>
@@ -75,6 +81,8 @@
 			<string>remote-notification</string>
 		</array>
 		<key>ITSAppUsesNonExemptEncryption</key>
+		<false/>
+		<key>GIDAppCheckEnabled</key>
 		<false/>
 	</dict>
 </plist>

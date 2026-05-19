@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_feather_icons/flutter_feather_icons.dart';
 import 'package:get/get.dart';
+import '../../../models/analysis_result.dart';
+import '../../../models/note.dart';
+import '../../../tools/hooks/hook_engine.dart';
+import '../../../widgets/nba_actions_widget.dart';
 import 'note_detail_controller.dart';
 import 'widgets/detail_audio_player.dart';
 import 'widgets/detail_content.dart';
@@ -62,6 +66,9 @@ class DesktopNoteDetail extends StatelessWidget {
           children: [
             DetailContent(controller: controller),
             const SizedBox(height: 32),
+            // ── NBA Actions ────────────────────────────────────────────
+            _NbaActionsSection(note: controller.note),
+            const SizedBox(height: 32),
             DetailAudioPlayer(controller: controller),
             const SizedBox(height: 32),
             Obx(() {
@@ -105,6 +112,32 @@ class DesktopNoteDetail extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _NbaActionsSection extends StatelessWidget {
+  final Note note;
+
+  const _NbaActionsSection({required this.note});
+
+  @override
+  Widget build(BuildContext context) {
+    return NbaActionsWidget(
+      context: NbaContext(
+        source: NbaSource.note,
+        note: note,
+        text: note.text.isNotEmpty ? note.text : note.transcript,
+        analysis: note.intent.isNotEmpty
+            ? AnalysisResult(
+                cleanedText: note.text,
+                intent: note.intent,
+                bucket: note.bucket,
+                topics: note.topics,
+              )
+            : null,
+      ),
+      trigger: HookTrigger.onNoteCreated,
     );
   }
 }

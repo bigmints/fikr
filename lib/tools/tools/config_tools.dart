@@ -1,9 +1,8 @@
 /// Config domain tools — read/write app settings.
 library;
 
-import 'package:get/get.dart';
+import 'package:fikr/tools/app_state_resolver.dart';
 
-import '../../controllers/app_controller.dart';
 import '../tool_interface.dart';
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -95,7 +94,7 @@ class ConfigSetTool extends FikrTool {
     ToolContext context,
   ) async {
     try {
-      final ctrl = Get.find<AppController>();
+      final ctrl = appState();
       final key = params['key'] as String;
       final value = params['value'];
 
@@ -155,7 +154,7 @@ class ConfigBucketsTool extends FikrTool {
     ToolContext context,
   ) async {
     try {
-      final ctrl = Get.find<AppController>();
+      final ctrl = appState();
       final newBuckets = (params['buckets'] as List<dynamic>?)
           ?.map((e) => e.toString())
           .toList();

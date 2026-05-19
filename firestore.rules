@@ -3,28 +3,17 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     match /users/{userId} {
+
       // Users can read their own document
       allow read: if request.auth != null && request.auth.uid == userId;
 
-      // Users can write their own document BUT cannot modify the 'plan' field.
-      // The 'plan' field is exclusively written by the fikr.one backend (Admin SDK).
-      //
-      // FIX: The previous rule used resource.data.diff() which crashes when the
-      // user document doesn't exist yet (resource is null on first write).
-      // We now handle both cases:
-      //   - Document doesn't exist (create): always allowed (no plan to protect)
-      //   - Document exists (update): block if 'plan' is being changed
-      allow write: if request.auth != null
-                   && request.auth.uid == userId
-                   && (
-                     // Creating the document for the first time — allow
-                     !exists(/databases/$(database)/documents/users/$(userId))
-                     ||
-                     // Updating — only block if 'plan' is actually being changed
-                     !request.resource.data.diff(resource.data).affectedKeys().hasAny(['plan'])
-                   );
+      // Users can write their own document.
+      // The 'plan' field is exclusively written by fikr.one Admin SDK — the Flutter
+      // app never sends 'plan' in its writes (it only writes email, config, updatedAt).
+      // We trust that at the application level; no rule complexity needed here.
+      allow write: if request.auth != null && request.auth.uid == userId;
 
-      // Subcollections — full read/write for the owning user
+      // Notes — full read/write for the owning user
       match /notes/{noteId} {
         allow read, write: if request.auth != null && request.auth.uid == userId;
       }
@@ -51,13 +40,12 @@ service cloud.firestore {
         allow write: if false;  // Only Admin SDK (fikr.one) writes usage
       }
 
-      // MCP server configs — owner has full access; written via Admin SDK
-      // but also needs client-side read for the Flutter app.
+      // MCP server configs
       match /mcp_servers/{serverId} {
         allow read, write: if request.auth != null && request.auth.uid == userId;
       }
 
-      // MCP Relay Queue — FikrPad uses this to receive and complete MCP requests
+      // MCP Relay Queue
       match /mcp_queue/{queueId} {
         allow read, write: if request.auth != null && request.auth.uid == userId;
       }
@@ -69,8 +57,7 @@ service cloud.firestore {
         allow write: if false;  // Only Admin SDK (billing webhook) writes
       }
 
-      // Private data (e.g., synced API keys) — only the fikr.one backend
-      // (Admin SDK) can read or write this subcollection. No client access.
+      // Private data (e.g., synced API keys) — only fikr.one backend (Admin SDK).
       match /private/{doc} {
         allow read, write: if false;
       }

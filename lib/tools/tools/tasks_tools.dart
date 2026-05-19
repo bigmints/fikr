@@ -1,10 +1,9 @@
 /// Tasks domain tools — CRUD for To Do items.
 library;
 
-import 'package:get/get.dart';
+import 'package:fikr/tools/app_state_resolver.dart';
 import 'package:uuid/uuid.dart';
 
-import '../../controllers/i_app_state.dart';
 import '../../models/insights_models.dart';
 import '../tool_interface.dart';
 
@@ -46,7 +45,7 @@ class TasksListTool extends FikrTool {
     ToolContext context,
   ) async {
     try {
-      final ctrl = Get.find<IAppState>();
+      final ctrl = appState();
       final status = params['status'] as String? ?? 'all';
       final limit = params['limit'] as int? ?? 50;
 
@@ -108,7 +107,7 @@ class TasksCreateTool extends FikrTool {
     ToolContext context,
   ) async {
     try {
-      final ctrl = Get.find<IAppState>();
+      final ctrl = appState();
       final item = TodoItem(
         id: const Uuid().v4(),
         title: params['title'] as String,
@@ -162,7 +161,7 @@ class TasksUpdateTool extends FikrTool {
     ToolContext context,
   ) async {
     try {
-      final ctrl = Get.find<IAppState>();
+      final ctrl = appState();
       final id = params['id'] as String;
       final index = ctrl.todoItems.indexWhere((t) => t.id == id);
       if (index == -1) return ToolResult.fail('Task not found: $id');
@@ -217,7 +216,7 @@ class TasksCompleteTool extends FikrTool {
     ToolContext context,
   ) async {
     try {
-      final ctrl = Get.find<IAppState>();
+      final ctrl = appState();
       await ctrl.toggleTaskComplete(params['id'] as String);
       return ToolResult.ok({'toggled': params['id']});
     } catch (e) {
@@ -258,7 +257,7 @@ class TasksDeleteTool extends FikrTool {
     ToolContext context,
   ) async {
     try {
-      final ctrl = Get.find<IAppState>();
+      final ctrl = appState();
       await ctrl.deleteTask(params['id'] as String);
       return ToolResult.ok({'deleted': params['id']});
     } catch (e) {
@@ -300,7 +299,7 @@ class TasksLinkNoteTool extends FikrTool {
     ToolContext context,
   ) async {
     try {
-      final ctrl = Get.find<IAppState>();
+      final ctrl = appState();
       final taskId = params['taskId'] as String;
       final noteId = params['noteId'] as String;
 
@@ -328,6 +327,46 @@ class TasksLinkNoteTool extends FikrTool {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+//  tasks.delete_completed
+// ───────────────────────────────────────────────────────────────────────────
+
+class TasksDeleteCompletedTool extends FikrTool {
+  @override
+  String get name => 'tasks.delete_completed';
+
+  @override
+  String get description =>
+      'Delete all completed tasks in one operation. '
+      'Returns {"deletedCount": N}.';
+
+  @override
+  Map<String, dynamic> get parametersSchema =>
+      {'type': 'object', 'properties': {}};
+
+  @override
+  ToolTier get requiredTier => ToolTier.free;
+
+  @override
+  ToolLocation get location => ToolLocation.local;
+
+  @override
+  Future<ToolResult> execute(
+    Map<String, dynamic> params,
+    ToolContext context,
+  ) async {
+    try {
+      final ctrl = appState();
+      final beforeCount = ctrl.todoItems.length;
+      await ctrl.deleteCompletedTasks();
+      final deleted = beforeCount - ctrl.todoItems.length;
+      return ToolResult.ok({'deletedCount': deleted});
+    } catch (e) {
+      return ToolResult.fail('Failed to delete completed tasks: $e');
+    }
+  }
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 //  Convenience
 // ───────────────────────────────────────────────────────────────────────────
 
@@ -337,5 +376,7 @@ List<FikrTool> allTasksTools() => [
       TasksUpdateTool(),
       TasksCompleteTool(),
       TasksDeleteTool(),
+      TasksDeleteCompletedTool(),
       TasksLinkNoteTool(),
     ];
+

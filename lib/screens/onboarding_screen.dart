@@ -4,7 +4,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_feather_icons/flutter_feather_icons.dart';
 import 'package:get/get.dart';
 
-import '../controllers/app_controller.dart';
+import 'package:fikr/controllers/app_controller.dart';
 import '../services/storage_service.dart';
 import '../utils/assets.dart';
 import 'home_shell.dart';
@@ -118,7 +118,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
       ),
     );
     if (mounted) {
-      Get.off(() => HomeShell());
+      Get.off(() => HomeShell(appController: Get.find<AppController>()));
     }
   }
 

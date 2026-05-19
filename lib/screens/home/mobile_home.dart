@@ -2,16 +2,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter_feather_icons/flutter_feather_icons.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
-import '../../controllers/app_controller.dart';
+import 'package:fikr/controllers/app_controller.dart';
 import '../../controllers/navigation_controller.dart';
 import '../../controllers/theme_controller.dart';
 import '../../models/app_config.dart';
 import '../../models/note.dart';
+import '../../models/scan.dart';
+import '../../models/feed_item.dart';
 import '../../widgets/collapsing_header.dart';
 import '../../utils/app_spacing.dart';
 import '../../utils/layout.dart';
 import '../note_detail_screen.dart';
 import 'widgets/note_card.dart';
+import '../vision/widgets/scan_card.dart';
 
 class MobileHome extends StatelessWidget {
   const MobileHome({
@@ -21,8 +24,8 @@ class MobileHome extends StatelessWidget {
     required this.emptyState,
   });
 
-  final List<Note> notes;
-  final List<Note> allNotes;
+  final List<FeedItem> notes;
+  final List<FeedItem> allNotes;
   final Widget emptyState;
 
   @override
@@ -276,6 +279,15 @@ class MobileHome extends StatelessWidget {
                                       items[i] as Note,
                                     ),
                                   ),
+                                )
+                              else if (items[i] is Scan)
+                                Padding(
+                                  padding: const EdgeInsets.only(
+                                    bottom: AppSpacing.md,
+                                  ),
+                                  child: ScanCard(
+                                    scan: items[i] as Scan,
+                                  ),
                                 ),
                           ],
                         );
@@ -292,11 +304,11 @@ class MobileHome extends StatelessWidget {
     );
   }
 
-  List<dynamic> _groupNotes(List<Note> notes, String groupBy) {
+  List<dynamic> _groupNotes(List<FeedItem> notes, String groupBy) {
     if (notes.isEmpty) return [];
     if (groupBy == 'none') return notes;
 
-    final grouped = <String, List<Note>>{};
+    final grouped = <String, List<FeedItem>>{};
     for (final note in notes) {
       String key;
       final date = note.createdAt;

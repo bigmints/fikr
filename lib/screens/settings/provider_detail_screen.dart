@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:url_launcher/url_launcher.dart';
-import '../../controllers/app_controller.dart';
+import 'package:fikr/controllers/app_controller.dart';
 import '../../models/llm_provider.dart';
 import '../../services/openai_service.dart';
 import '../../services/toast_service.dart';
@@ -26,6 +26,7 @@ class _ProviderDetailScreenState extends State<ProviderDetailScreen> {
   void initState() {
     super.initState();
     _keyController = TextEditingController();
+
     _keyController.addListener(_validate);
 
     final p = widget.provider;
@@ -33,14 +34,14 @@ class _ProviderDetailScreenState extends State<ProviderDetailScreen> {
       _selectedType = p.type;
       _loadApiKey(p.id);
     } else {
-      _selectedType = LLMProviderType.google;
+      _selectedType = LLMProviderType.gemini;
     }
 
     WidgetsBinding.instance.addPostFrameCallback((_) => _validate());
   }
 
   void _validate() {
-    final isValid = _keyController.text.trim().isNotEmpty;
+    final bool isValid = _keyController.text.trim().isNotEmpty;
     if (isValid != _isValid) {
       setState(() => _isValid = isValid);
     }
@@ -63,8 +64,10 @@ class _ProviderDetailScreenState extends State<ProviderDetailScreen> {
     switch (type) {
       case LLMProviderType.openai:
         return 'https://platform.openai.com/api-keys';
-      case LLMProviderType.google:
+      case LLMProviderType.gemini:
         return 'https://aistudio.google.com/app/apikey';
+      case LLMProviderType.openrouter:
+        return 'https://openrouter.ai/keys';
     }
   }
 
@@ -72,8 +75,10 @@ class _ProviderDetailScreenState extends State<ProviderDetailScreen> {
     switch (type) {
       case LLMProviderType.openai:
         return 'sk-...';
-      case LLMProviderType.google:
+      case LLMProviderType.gemini:
         return 'AIza...';
+      case LLMProviderType.openrouter:
+        return 'sk-or-v1-...';
     }
   }
 
@@ -256,7 +261,10 @@ class _ProviderDetailScreenState extends State<ProviderDetailScreen> {
               const SizedBox(height: 32),
 
               // API Key
-              Text('Your Secret Key', style: theme.textTheme.labelLarge),
+              Text(
+                'Your Secret Key',
+                style: theme.textTheme.labelLarge,
+              ),
               const SizedBox(height: 8),
               TextField(
                 controller: _keyController,

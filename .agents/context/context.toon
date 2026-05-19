@@ -1,0 +1,68 @@
+project:
+  name: fikr
+  status: in-development
+  created: "2023-01-01"
+  last_updated: "2026-05-19"
+  last_commit: "see git log"
+
+stack:
+  platforms: "iOS, Android, macOS, Windows"
+  framework: Flutter
+  language: Dart
+  state_management: GetX
+  storage_local: Hive + flutter_secure_storage
+  storage_cloud: Firestore (Plus/Pro only)
+  auth: "fikr.one custom Firebase token → FirebaseService.signInWithCustomToken()"
+  ai_local: BYOK (user-supplied API key, Free tier)
+  ai_managed: "OpenRouter presets (Plus/Pro via fikr.one backend)"
+  firebase: "Firebase Auth + Firestore + Storage"
+
+agentic:
+  context_format: TOON
+  skills_dir: .agents/skills/
+  workflows_dir: .agents/workflows/
+  context_dir: .agents/context/
+  task_manager: .agents/skills/task-manager/manage.sh
+  validate: .agents/skills/validate-code/validate.sh
+  heartbeat: .agents/skills/heartbeat/pulse.sh
+
+architecture:
+  philosophy: "Every domain mutation goes through EngineController.executeTool() — no exceptions"
+  tool_mandate: true
+  entry_point: lib/main.dart
+  tools_dir: lib/tools/tools/
+  skills_dir: lib/tools/skill_engine/skills/
+  tool_registry: lib/tools/tool_registry.dart
+  engine_controller: lib/tools/engine/engine_controller.dart
+
+services_registered_in_main:
+  - StorageService
+  - LLMService
+  - AudioSyncService
+  - AppController
+  - ThemeController
+  - EngineController
+
+subscription_tiers:
+  free: "BYOK, local storage only, no cloud sync"
+  plus: "Managed AI + Cloud Sync (Firebase), 500k words/mo"
+  pro: "Managed AI + Cloud Sync, 1.5M words/mo, advanced analysis"
+  tier_source: "Firestore: users/{uid}.plan — written only by fikr.one Admin SDK"
+
+key_decisions[5]{id,decision,adr}:
+  001,Every domain mutation routes through EngineController.executeTool() — no exceptions,.agents/context/adrs/001-tool-based-architecture.md
+  002,Tools use Get.find<IAppState>() never AppController directly — enables unit testing,.agents/context/adrs/002-iappstate-interface-contract.md
+  003,Multi-step workflows declared as Skills (DAG of SkillSteps) via SkillEngine,.agents/context/adrs/003-skill-engine-multi-step-workflows.md
+  004,External services (MCP/Webhook/REST) register as first-class tools via ToolRegistrar,.agents/context/adrs/004-external-tool-registration.md
+  005,Tier enforcement happens at EngineController before any tool execute() — ToolResult.tierDenied,.agents/context/adrs/005-tier-enforcement-at-tool-level.md
+
+key_rules:
+  - "Read adrs/001 before ANY feature work — tool mandate is non-negotiable"
+  - "Read adrs/001-005 for architecture rules — non-negotiable"
+  - "flutter analyze must report 0 issues before every commit"
+  - "flutter pub get must run without error"
+  - "All new assets declared in pubspec.yaml"
+  - "New tools: implement FikrTool with FikrToolMixin, add to allXxxTools(), test, done"
+
+# Active tasks tracked in .agents/skills/task-manager/todo.toon
+# Use git log for recent change history

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_feather_icons/flutter_feather_icons.dart';
 import 'package:get/get.dart';
-import '../../controllers/app_controller.dart';
+import 'package:fikr/controllers/app_controller.dart';
 import '../../controllers/record_controller.dart';
 import '../../utils/assets.dart';
 import '../note_detail_screen.dart';

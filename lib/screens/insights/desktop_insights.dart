@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../../controllers/app_controller.dart';
+import 'package:fikr/controllers/app_controller.dart';
 import '../../utils/layout.dart';
 import 'widgets/topic_mind_map.dart';
 

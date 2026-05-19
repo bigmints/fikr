@@ -64,7 +64,7 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions macos = FirebaseOptions(
     apiKey: 'AIzaSyBSv_Z_PaXOk0HpTrM_PxoqFkK0SPQXIFw',
-    appId: '1:69536493117:web:545d15b5c440fbb9918454',
+    appId: '1:69536493117:ios:1a966886459895b8918454',
     messagingSenderId: '69536493117',
     projectId: 'fikr-apps',
     authDomain: 'fikr-apps.firebaseapp.com',

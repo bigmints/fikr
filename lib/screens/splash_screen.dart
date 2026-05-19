@@ -1,3 +1,4 @@
+import 'package:fikr/controllers/app_controller.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:get/get.dart';
@@ -42,7 +43,7 @@ class _SplashScreenState extends State<SplashScreen>
         final onboarded = await storage.isOnboardingComplete();
         if (!mounted) return;
         if (onboarded) {
-          Get.off(() => HomeShell());
+          Get.off(() => HomeShell(appController: Get.find<AppController>()));
         } else {
           Get.off(() => const OnboardingScreen());
         }

@@ -1,0 +1,20 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Fikr Studio collections
+    // The Fikr Studio Electron app uses the Firebase Admin SDK, which bypasses
+    // these rules entirely. We explicitly block all client-side read/write access
+    // to ensure these collections are only ever accessed by the Studio Node backend.
+    
+    match /studio_projects/{projectId} {
+      allow read, write: if false;
+    }
+    
+    match /studio_notes/{noteId} {
+      allow read, write: if false;
+    }
+    
+  }
+}

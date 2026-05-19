@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:uuid/uuid.dart';
 
 /// Safely converts a dynamic value to a `List<dynamic>`.
 /// Handles null, List, and String (returns empty list for String).
@@ -99,7 +100,9 @@ class TodoItem {
 
   factory TodoItem.fromJson(Map<String, dynamic> json) {
     return TodoItem(
-      id: json['id'] as String? ?? '',
+      id: (json['id'] as String?)?.isNotEmpty == true
+          ? json['id'] as String
+          : const Uuid().v4(),
       title: json['title'] as String? ?? '',
       source: json['source'] as String? ?? '',
       status: json['status'] as String? ?? 'todo',
@@ -139,6 +142,7 @@ class ReminderItem {
   final String? time;
   final String sourceNoteId;
   final bool isDismissed;
+  final bool isNotified;
 
   const ReminderItem({
     required this.id,
@@ -147,9 +151,10 @@ class ReminderItem {
     this.time,
     this.sourceNoteId = '',
     this.isDismissed = false,
+    this.isNotified = false,
   });
 
-  ReminderItem copyWith({bool? isDismissed}) {
+  ReminderItem copyWith({bool? isDismissed, bool? isNotified}) {
     return ReminderItem(
       id: id,
       title: title,
@@ -157,6 +162,7 @@ class ReminderItem {
       time: time,
       sourceNoteId: sourceNoteId,
       isDismissed: isDismissed ?? this.isDismissed,
+      isNotified: isNotified ?? this.isNotified,
     );
   }
 
@@ -168,12 +174,15 @@ class ReminderItem {
       'time': time,
       'sourceNoteId': sourceNoteId,
       'isDismissed': isDismissed,
+      'isNotified': isNotified,
     };
   }
 
   factory ReminderItem.fromJson(Map<String, dynamic> json) {
     return ReminderItem(
-      id: json['id'] as String? ?? '',
+      id: (json['id'] as String?)?.isNotEmpty == true
+          ? json['id'] as String
+          : const Uuid().v4(),
       title: json['title'] as String? ?? '',
       date: json['date'] != null
           ? DateTime.parse(json['date'] as String)
@@ -181,6 +190,7 @@ class ReminderItem {
       time: json['time'] as String?,
       sourceNoteId: json['sourceNoteId'] as String? ?? '',
       isDismissed: json['isDismissed'] as bool? ?? false,
+      isNotified: json['isNotified'] as bool? ?? false,
     );
   }
 
@@ -318,7 +328,9 @@ class InsightEdition {
         .map(InsightHighlight.fromJson)
         .toList();
     return InsightEdition(
-      id: json['id'] as String? ?? '',
+      id: (json['id'] as String?)?.isNotEmpty == true
+          ? json['id'] as String
+          : const Uuid().v4(),
       createdAt: json['createdAt'] != null
           ? DateTime.parse(json['createdAt'] as String)
           : DateTime.now(),

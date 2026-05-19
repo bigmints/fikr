@@ -2,8 +2,8 @@
 library;
 
 import 'package:get/get.dart';
+import 'package:fikr/tools/app_state_resolver.dart';
 
-import '../../controllers/app_controller.dart';
 import '../../services/sync_service.dart';
 import '../tool_interface.dart';
 
@@ -77,7 +77,7 @@ class SyncPullTool extends FikrTool {
     try {
       final syncService = Get.find<SyncService>();
       await syncService.syncFromCloud();
-      final ctrl = Get.find<AppController>();
+      final ctrl = appState();
       await ctrl.reloadAllData();
       return ToolResult.ok({'pulled': true});
     } catch (e) {

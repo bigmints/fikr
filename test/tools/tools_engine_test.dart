@@ -9,20 +9,28 @@ import 'package:get/get.dart';
 import 'package:uuid/uuid.dart';
 
 import 'package:fikr/models/note.dart';
+import 'package:fikr/models/analysis_result.dart';
 import 'package:fikr/models/app_config.dart';
 import 'package:fikr/models/insights_models.dart';
 import 'package:fikr/controllers/i_app_state.dart';
 import 'package:fikr/tools/tool_interface.dart';
+import 'package:fikr/tools/tool_registry.dart';
 import 'package:fikr/tools/tools/notes_tools.dart';
 import 'package:fikr/tools/tools/tasks_tools.dart';
 import 'package:fikr/tools/tools/reminders_tools.dart';
+import 'package:fikr/tools/tools/notifications_tools.dart';
+import 'package:fikr/tools/skill_engine/skill.dart';
+import 'package:fikr/tools/skill_engine/skill_executor.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Fake App State
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Lightweight test double. Extends IAppState so Get.find<IAppState>() works.
+/// Lightweight test double. Extends IAppState so `Get.find<IAppState>()` works.
 class _FakeAppState extends IAppState {
+  @override
+  final Rx<AppConfig> config = AppConfig.fromJson({}).obs;
+
   @override
   final RxList<Note> notes = <Note>[].obs;
 
@@ -86,8 +94,69 @@ class _FakeAppState extends IAppState {
   }
 
   @override
+  Future<void> deleteCompletedTasks() async {
+    todoItems.removeWhere((t) => t.isCompleted);
+    saveTasksCalls++;
+  }
+
+  @override
   Future<String?> exportAll(String dir) async => '$dir/fikr-export.md';
+
+  @override
+  Future<Note> finalizeNote({
+    required String id,
+    required DateTime createdAt,
+    required String audioPath,
+    required String transcript,
+    required AnalysisResult analysis,
+    String transcriptStyle = 'cleaned',
+  }) async {
+    final note = Note(
+      id: id,
+      createdAt: createdAt,
+      updatedAt: createdAt,
+      title: 'Finalized',
+      text: transcript,
+      transcript: transcript,
+      intent: '',
+      bucket: 'General',
+      topics: [],
+    );
+    notes.insert(0, note);
+    saveNotesCalls++;
+    return note;
+  }
+
+  @override
+  Future<Note> createEmptyNote() async {
+    final note = Note(
+      id: 'draft',
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+      title: '',
+      text: '',
+      transcript: '',
+      intent: '',
+      bucket: 'General',
+      topics: [],
+    );
+    notes.insert(0, note);
+    return note;
+  }
+
+  @override
+  Future<void> playAudio(Note note) async {}
+
+  @override
+  Future<void> updateNoteAudioUrl(String noteId, String audioUrl) async {}
+
+  @override
+  Future<void> updateConfig(AppConfig updatedConfig) async {}
+
+  @override
+  Future<void> reloadAllData() async {}
 }
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -226,7 +295,9 @@ void main() {
     });
 
     test('respects limit param', () async {
-      for (var i = 0; i < 10; i++) state.notes.add(makeNote(title: 'N$i'));
+      for (var i = 0; i < 10; i++) {
+        state.notes.add(makeNote(title: 'N$i'));
+      }
       final r = await tool.execute({'limit': 3}, emptyCtx());
       expect((r.data as List).length, 3);
     });
@@ -256,7 +327,36 @@ void main() {
       final r = await tool.execute({}, emptyCtx());
       expect((r.data as List).first['title'], 'New');
     });
+
+    test('CRITICAL: excludes archived notes by default (deleted-note bug)', () async {
+      final now = DateTime.now();
+      state.notes.addAll([
+        Note(id: 'live', createdAt: now, updatedAt: now, title: 'Live Note',
+            text: 'visible', transcript: '', intent: '', bucket: 'G', topics: [],
+            archived: false),
+        Note(id: 'dead', createdAt: now, updatedAt: now, title: 'Deleted Note',
+            text: 'should not appear in insights', transcript: '', intent: '',
+            bucket: 'G', topics: [], archived: true),
+      ]);
+      final r = await tool.execute({}, emptyCtx());
+      final titles = (r.data as List).map((n) => n['title']).toList();
+      expect(titles, contains('Live Note'));
+      expect(titles, isNot(contains('Deleted Note')));
+    });
+
+    test('includes archived notes when excludeArchived=false', () async {
+      final now = DateTime.now();
+      state.notes.addAll([
+        Note(id: 'live2', createdAt: now, updatedAt: now, title: 'Live',
+            text: '', transcript: '', intent: '', bucket: 'G', topics: [], archived: false),
+        Note(id: 'dead2', createdAt: now, updatedAt: now, title: 'Archived',
+            text: '', transcript: '', intent: '', bucket: 'G', topics: [], archived: true),
+      ]);
+      final r = await tool.execute({'excludeArchived': false}, emptyCtx());
+      expect((r.data as List).length, 2);
+    });
   });
+
 
   // ── notes.get ──────────────────────────────────────────────────────────────
   group('notes.get', () {
@@ -389,7 +489,9 @@ void main() {
     });
 
     test('respects limit', () async {
-      for (var i = 0; i < 8; i++) state.todoItems.add(makeTask(title: 'T$i'));
+      for (var i = 0; i < 8; i++) {
+        state.todoItems.add(makeTask(title: 'T$i'));
+      }
       final r = await tool.execute({'limit': 5}, emptyCtx());
       expect((r.data as List).length, 5);
     });
@@ -611,6 +713,7 @@ void main() {
         ...allNotesTools(),
         ...allTasksTools(),
         ...allRemindersTools(),
+        ...allNotificationsTools(),
       ];
       for (final t in all) {
         expect(t.name, isNotEmpty, reason: 'missing tool name');
@@ -626,6 +729,7 @@ void main() {
         ...allNotesTools(),
         ...allTasksTools(),
         ...allRemindersTools(),
+        ...allNotificationsTools(),
       ];
       final names = all.map((t) => t.name).toList();
       expect(
@@ -633,6 +737,18 @@ void main() {
         names.length,
         reason: 'Duplicate tool names detected',
       );
+    });
+    test('all notifications tools metadata', () {
+      for (final t in allNotificationsTools()) {
+        expect(t.name, isNotEmpty);
+        if (t is NotifyPushTool) {
+          expect(t.requiredTier, ToolTier.plus);
+          expect(t.location, ToolLocation.cloud);
+        } else {
+          expect(t.requiredTier, ToolTier.free);
+          expect(t.location, ToolLocation.local);
+        }
+      }
     });
   });
 
@@ -771,4 +887,177 @@ void main() {
       expect((noteResult.data as Map)['title'], 'Launch plan');
     });
   });
+
+  // ── tasks.delete_completed ────────────────────────────────────────────────
+  group('tasks.delete_completed', () {
+    test('removes all completed tasks, leaves pending intact', () async {
+      state.todoItems.addAll([
+        makeTask(id: 'dc-1', title: 'Keep this', status: 'todo'),
+        makeTask(id: 'dc-2', title: 'Delete this', status: 'done'),
+        makeTask(id: 'dc-3', title: 'Also delete', status: 'done'),
+      ]);
+      final r = await TasksDeleteCompletedTool().execute({}, emptyCtx());
+      expect(r.success, isTrue);
+      expect(state.todoItems.length, 1);
+      expect(state.todoItems.first.title, 'Keep this');
+      expect(state.saveTasksCalls, greaterThan(0));
+    });
+
+    test('succeeds with no-op when no completed tasks exist', () async {
+      state.todoItems.addAll([
+        makeTask(title: 'Pending 1'),
+        makeTask(title: 'Pending 2'),
+      ]);
+      final r = await TasksDeleteCompletedTool().execute({}, emptyCtx());
+      expect(r.success, isTrue);
+      expect(state.todoItems.length, 2);
+    });
+
+    test('empties list when all tasks are completed', () async {
+      state.todoItems.addAll([
+        makeTask(id: 'dc-4', status: 'done'),
+        makeTask(id: 'dc-5', status: 'done'),
+      ]);
+      final r = await TasksDeleteCompletedTool().execute({}, emptyCtx());
+      expect(r.success, isTrue);
+      expect(state.todoItems, isEmpty);
+    });
+  });
+
+  // ── SkillExecutor — parallel group execution ───────────────────────────────
+  group('SkillExecutor parallel groups', () {
+    /// Minimal fake tool that resolves after [delay] and stores its output.
+    FikrTool makeFakeTool(String toolName, dynamic output, {Duration delay = Duration.zero}) {
+      return _DelayedFakeTool(toolName, output, delay);
+    }
+
+    test('parallel steps execute concurrently and both outputs are stored', () async {
+      final registry = ToolRegistry.forTesting();
+      registry.registerAll([
+        makeFakeTool('tool.a', {'val': 'A'}),
+        makeFakeTool('tool.b', {'val': 'B'}),
+      ]);
+
+      final skill = Skill(
+        name: 'parallel_test',
+        description: 'Tests parallel execution',
+        steps: const [
+          SkillStep(toolName: 'tool.a', input: {}, outputKey: 'resultA', parallel: true),
+          SkillStep(toolName: 'tool.b', input: {}, outputKey: 'resultB', parallel: true),
+        ],
+      );
+
+      final executor = SkillExecutor(registry: registry);
+      final ctx = emptyCtx();
+      final result = await executor.execute(skill, ctx);
+
+      expect(result.success, isTrue);
+      expect(result.variables['resultA'], {'val': 'A'});
+      expect(result.variables['resultB'], {'val': 'B'});
+    });
+
+    test('parallel step failure with fail policy aborts skill', () async {
+      final registry = ToolRegistry.forTesting();
+      registry.registerAll([
+        makeFakeTool('tool.ok', {'ok': true}),
+        _FailingFakeTool('tool.fail'),
+      ]);
+
+      final skill = Skill(
+        name: 'parallel_fail_test',
+        description: 'Fails on one parallel branch',
+        steps: const [
+          SkillStep(toolName: 'tool.ok', input: {}, outputKey: 'ok', parallel: true),
+          SkillStep(
+            toolName: 'tool.fail',
+            input: {},
+            outputKey: 'fail',
+            parallel: true,
+            onError: StepErrorPolicy.fail,
+          ),
+        ],
+      );
+
+      final executor = SkillExecutor(registry: registry);
+      final result = await executor.execute(skill, emptyCtx());
+
+      expect(result.success, isFalse);
+      expect(result.error, isNotEmpty);
+    });
+
+    test('parallel step failure with skip policy allows skill to complete', () async {
+      final registry = ToolRegistry.forTesting();
+      registry.registerAll([
+        makeFakeTool('tool.good', {'val': 'good'}),
+        _FailingFakeTool('tool.bad'),
+      ]);
+
+      final skill = Skill(
+        name: 'parallel_skip_test',
+        description: 'Skips failed parallel branch',
+        steps: const [
+          SkillStep(toolName: 'tool.good', input: {}, outputKey: 'good', parallel: true),
+          SkillStep(
+            toolName: 'tool.bad',
+            input: {},
+            outputKey: 'bad',
+            parallel: true,
+            onError: StepErrorPolicy.skip,
+          ),
+        ],
+      );
+
+      final executor = SkillExecutor(registry: registry);
+      final result = await executor.execute(skill, emptyCtx());
+
+      expect(result.success, isTrue);
+      expect(result.variables['good'], {'val': 'good'});
+    });
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fake tools for SkillExecutor tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _DelayedFakeTool extends FikrTool {
+  _DelayedFakeTool(this._name, this._output, this._delay);
+  final String _name;
+  final dynamic _output;
+  final Duration _delay;
+
+  @override String get name => _name;
+  @override String get description => 'Fake tool: $_name';
+  @override Map<String, dynamic> get parametersSchema =>
+      {'type': 'object', 'properties': {}};
+  @override ToolTier get requiredTier => ToolTier.free;
+  @override ToolLocation get location => ToolLocation.local;
+
+  @override
+  Future<ToolResult> execute(
+    Map<String, dynamic> params,
+    ToolContext context,
+  ) async {
+    if (_delay > Duration.zero) await Future<void>.delayed(_delay);
+    return ToolResult.ok(_output);
+  }
+}
+
+class _FailingFakeTool extends FikrTool {
+  _FailingFakeTool(this._name);
+  final String _name;
+
+  @override String get name => _name;
+  @override String get description => 'Failing fake tool';
+  @override Map<String, dynamic> get parametersSchema =>
+      {'type': 'object', 'properties': {}};
+  @override ToolTier get requiredTier => ToolTier.free;
+  @override ToolLocation get location => ToolLocation.local;
+
+  @override
+  Future<ToolResult> execute(
+    Map<String, dynamic> params,
+    ToolContext context,
+  ) async =>
+      ToolResult.fail('Intentional failure from $_name');
 }

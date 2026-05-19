@@ -13,7 +13,6 @@ import 'package:get/get.dart';
 import '../../controllers/subscription_controller.dart';
 
 import '../../services/fikr_api_service.dart';
-import '../../services/firebase_service.dart';
 import '../../services/openai_service.dart';
 
 import '../tool_interface.dart';
@@ -22,7 +21,7 @@ import '../tool_interface.dart';
 //  ai.transcribe
 // ───────────────────────────────────────────────────────────────────────────
 
-class AiTranscribeTool extends FikrTool {
+class AiTranscribeTool extends FikrTool with FikrToolMixin {
   @override
   String get name => 'ai.transcribe';
 
@@ -52,64 +51,68 @@ class AiTranscribeTool extends FikrTool {
   ToolTier get requiredTier => ToolTier.free;
 
   @override
-  ToolLocation get location => ToolLocation.local; // cloud for Pro, handled inside
+  ToolLocation get location => ToolLocation.local;
 
   @override
   Future<ToolResult> execute(
     Map<String, dynamic> params,
     ToolContext context,
-  ) async {
-    try {
-      final audioPath = params['audioPath'] as String;
-      final language = params['language'] as String? ?? context.config.language;
-      final audioFile = File(audioPath);
+  ) =>
+      guard(context, () async {
+        final audioPath = params['audioPath'] as String;
+        final language = params['language'] as String? ?? context.config.language;
+        final audioFile = File(audioPath);
 
-      if (!audioFile.existsSync()) {
-        return ToolResult.fail('Audio file not found: $audioPath');
-      }
+        context.logger.info('Starting transcription', data: {'path': audioPath, 'lang': language});
 
-      final sub = Get.find<SubscriptionController>();
+        if (!audioFile.existsSync()) {
+          context.logger.error('Audio file not found', data: {'path': audioPath});
+          return ToolResult.fail('Audio file not found: $audioPath');
+        }
 
-      // Pro tier → Managed Vertex AI via fikr.one
-      if (sub.hasManagedVertexAI) {
-        final transcript = await FikrApiService().transcribeAudio(audioFile);
+        final sub = Get.find<SubscriptionController>();
+
+        // Pro tier → Managed Vertex AI via fikr.one
+        if (sub.hasManagedVertexAI) {
+          context.logger.info('Using managed Vertex AI path');
+          final transcript = await FikrApiService().transcribeAudio(audioFile);
+          context.logger.info('Transcription complete (Pro)', data: {'chars': transcript.length});
+          return ToolResult.ok({'transcript': transcript});
+        }
+
+        // BYOK path
+        final provider = context.config.activeProvider;
+        if (provider == null) {
+          context.logger.error('No AI provider configured');
+          return ToolResult.fail('No AI provider configured. Go to Settings.');
+        }
+
+        final apiKey = await context.storage!.getApiKey(provider.id);
+        if (apiKey == null || apiKey.isEmpty) {
+          context.logger.error('Missing API key', data: {'provider': provider.id});
+          return ToolResult.fail('Missing API key. Go to Settings.');
+        }
+
+        context.logger.info('Using BYOK path', data: {'provider': provider.id});
+        final llmService = Get.find<LLMService>();
+
+        final transcript = await llmService.transcribeAudio(
+          audioFile: audioFile,
+          provider: provider,
+          apiKey: apiKey,
+          language: language,
+        );
+
+        context.logger.info('Transcription complete (BYOK)', data: {'chars': transcript.length});
         return ToolResult.ok({'transcript': transcript});
-      }
-
-      // BYOK path
-      final provider = context.config.activeProvider;
-      if (provider == null) {
-        return ToolResult.fail('No AI provider configured. Go to Settings.');
-      }
-
-      final apiKey = await context.storage!.getApiKey(provider.id);
-      if (apiKey == null || apiKey.isEmpty) {
-        return ToolResult.fail('Missing API key. Go to Settings.');
-      }
-
-      final byokModels = FirebaseService().getByokModels(provider.type);
-      final llmService = Get.find<LLMService>();
-
-      final transcript = await llmService.transcribeAudio(
-        audioFile: audioFile,
-        provider: provider,
-        model: byokModels.transcription,
-        apiKey: apiKey,
-        language: language,
-      );
-
-      return ToolResult.ok({'transcript': transcript});
-    } catch (e) {
-      return ToolResult.fail('Transcription failed: $e');
-    }
-  }
+      });
 }
 
 // ───────────────────────────────────────────────────────────────────────────
 //  ai.analyze
 // ───────────────────────────────────────────────────────────────────────────
 
-class AiAnalyzeTool extends FikrTool {
+class AiAnalyzeTool extends FikrTool with FikrToolMixin {
   @override
   String get name => 'ai.analyze';
 
@@ -142,60 +145,63 @@ class AiAnalyzeTool extends FikrTool {
   Future<ToolResult> execute(
     Map<String, dynamic> params,
     ToolContext context,
-  ) async {
-    try {
-      final transcript = params['transcript'] as String;
-      final buckets = (params['buckets'] as List<dynamic>?)
-              ?.map((e) => e.toString())
-              .toList() ??
-          context.config.buckets;
+  ) =>
+      guard(context, () async {
+        final transcript = params['transcript'] as String;
+        final buckets = (params['buckets'] as List<dynamic>?)
+                ?.map((e) => e.toString())
+                .toList() ??
+            context.config.buckets;
 
-      final sub = Get.find<SubscriptionController>();
+        context.logger.info('Starting analysis', data: {'transcriptChars': transcript.length, 'buckets': buckets});
 
-      // Pro tier → fikr.one
-      if (sub.hasManagedVertexAI) {
-        final data = await FikrApiService().analyzeTranscript(
+        final sub = Get.find<SubscriptionController>();
+
+        // Pro tier → fikr.one
+        if (sub.hasManagedVertexAI) {
+          context.logger.info('Using managed Vertex AI path');
+          final data = await FikrApiService().analyzeTranscript(
+            transcript: transcript,
+            buckets: buckets,
+          );
+          context.logger.info('Analysis complete (Pro)', data: {'bucket': data['bucket']});
+          return ToolResult.ok(data);
+        }
+
+        // BYOK path
+        final provider = context.config.activeProvider;
+        if (provider == null) {
+          context.logger.error('No AI provider configured');
+          return ToolResult.fail('No AI provider configured.');
+        }
+
+        final apiKey = await context.storage!.getApiKey(provider.id);
+        if (apiKey == null || apiKey.isEmpty) {
+          context.logger.error('Missing API key', data: {'provider': provider.id});
+          return ToolResult.fail('Missing API key.');
+        }
+
+        context.logger.info('Using BYOK path', data: {'provider': provider.id});
+        final llmService = Get.find<LLMService>();
+
+        final result = await llmService.analyzeTranscript(
           transcript: transcript,
+          provider: provider,
+          apiKey: apiKey,
           buckets: buckets,
+          multiBucket: context.config.multiBucket,
         );
-        return ToolResult.ok(data);
-      }
 
-      // BYOK path
-      final provider = context.config.activeProvider;
-      if (provider == null) {
-        return ToolResult.fail('No AI provider configured.');
-      }
-
-      final apiKey = await context.storage!.getApiKey(provider.id);
-      if (apiKey == null || apiKey.isEmpty) {
-        return ToolResult.fail('Missing API key.');
-      }
-
-      final byokModels = FirebaseService().getByokModels(provider.type);
-      final llmService = Get.find<LLMService>();
-
-      final result = await llmService.analyzeTranscript(
-        transcript: transcript,
-        provider: provider,
-        model: byokModels.analysis,
-        apiKey: apiKey,
-        buckets: buckets,
-        multiBucket: context.config.multiBucket,
-      );
-
-      return ToolResult.ok(result.toJson());
-    } catch (e) {
-      return ToolResult.fail('Analysis failed: $e');
-    }
-  }
+        context.logger.info('Analysis complete (BYOK)', data: {'bucket': result.bucket, 'topics': result.topics});
+        return ToolResult.ok(result.toJson());
+      });
 }
 
 // ───────────────────────────────────────────────────────────────────────────
 //  ai.insights
 // ───────────────────────────────────────────────────────────────────────────
 
-class AiInsightsTool extends FikrTool {
+class AiInsightsTool extends FikrTool with FikrToolMixin {
   @override
   String get name => 'ai.insights';
 
@@ -235,71 +241,92 @@ class AiInsightsTool extends FikrTool {
   Future<ToolResult> execute(
     Map<String, dynamic> params,
     ToolContext context,
-  ) async {
-    try {
-      final notes = (params['notes'] as List<dynamic>)
-          .map((e) => e as Map<String, dynamic>)
-          .toList();
-      final buckets = (params['buckets'] as List<dynamic>?)
-              ?.map((e) => e.toString())
-              .toList() ??
-          context.config.buckets;
-      final existingTitles = (params['existingTaskTitles'] as List<dynamic>?)
-              ?.map((e) => e.toString())
-              .toList() ??
-          const [];
+  ) =>
+      guard(context, () async {
+        final notes = (params['notes'] as List<dynamic>)
+            .map((e) => e as Map<String, dynamic>)
+            .toList();
+        final buckets = (params['buckets'] as List<dynamic>?)
+                ?.map((e) => e.toString())
+                .toList() ??
+            context.config.buckets;
+        final existingTitles = (params['existingTaskTitles'] as List<dynamic>?)
+                ?.map((e) => e.toString())
+                .toList() ??
+            const [];
 
-      final sub = Get.find<SubscriptionController>();
+        context.logger.info('Starting insight generation', data: {
+          'noteCount': notes.length,
+          'buckets': buckets,
+          'existingTasks': existingTitles.length,
+        });
 
-      // Pro tier → fikr.one
-      if (sub.hasManagedVertexAI) {
-        final data = await FikrApiService().generateInsights(
+        if (notes.isEmpty) {
+          context.logger.warn('No notes available for insight generation');
+          return ToolResult.fail('No notes to generate insights from.');
+        }
+
+        final sub = Get.find<SubscriptionController>();
+
+        // Pro tier → fikr.one
+        if (sub.hasManagedVertexAI) {
+          context.logger.info('Using managed Vertex AI path');
+          final data = await FikrApiService().generateInsights(
+            notes: notes,
+            buckets: buckets,
+            existingTaskTitles: existingTitles,
+          );
+          context.logger.info('Insights complete (Pro)', data: {
+            'highlights': (data['highlights'] as List?)?.length ?? 0,
+            'tasks': (data['tasks'] as List?)?.length ?? 0,
+          });
+          return ToolResult.ok(data);
+        }
+
+        // BYOK path
+        final provider = context.config.activeProvider;
+        if (provider == null) {
+          context.logger.error('No AI provider configured — cannot generate insights');
+          return ToolResult.fail('No AI provider configured.');
+        }
+
+        final apiKey = await context.storage!.getApiKey(provider.id);
+        if (apiKey == null || apiKey.isEmpty) {
+          context.logger.error('Missing API key', data: {'provider': provider.id});
+          return ToolResult.fail('Missing API key.');
+        }
+
+        context.logger.info('Using BYOK path', data: {'provider': provider.id});
+        final llmService = Get.find<LLMService>();
+
+        final result = await llmService.generateInsights(
           notes: notes,
+          provider: provider,
+          apiKey: apiKey,
           buckets: buckets,
           existingTaskTitles: existingTitles,
         );
-        return ToolResult.ok(data);
-      }
 
-      // BYOK path
-      final provider = context.config.activeProvider;
-      if (provider == null) {
-        return ToolResult.fail('No AI provider configured.');
-      }
+        context.logger.info('Insights complete (BYOK)', data: {
+          'highlights': result.highlights.length,
+          'tasks': result.llmTasks.length,
+          'reminders': result.llmReminders.length,
+          'summary': result.summary.length,
+        });
 
-      final apiKey = await context.storage!.getApiKey(provider.id);
-      if (apiKey == null || apiKey.isEmpty) {
-        return ToolResult.fail('Missing API key.');
-      }
-
-      final byokModels = FirebaseService().getByokModels(provider.type);
-      final llmService = Get.find<LLMService>();
-
-      final result = await llmService.generateInsights(
-        notes: notes,
-        provider: provider,
-        model: byokModels.analysis,
-        apiKey: apiKey,
-        buckets: buckets,
-        existingTaskTitles: existingTitles,
-      );
-
-      return ToolResult.ok({
-        'title': result.title,
-        'summary': result.summary,
-        'highlights': result.highlights.map((h) => h.toJson()).toList(),
-        'focus': result.focus,
-        'nextSteps': result.nextSteps,
-        'risks': result.risks,
-        'questions': result.questions,
-        'workSummaries': result.workSummaries,
-        'tasks': result.llmTasks,
-        'reminders': result.llmReminders,
+        return ToolResult.ok({
+          'title': result.title,
+          'summary': result.summary,
+          'highlights': result.highlights.map((h) => h.toJson()).toList(),
+          'focus': result.focus,
+          'nextSteps': result.nextSteps,
+          'risks': result.risks,
+          'questions': result.questions,
+          'workSummaries': result.workSummaries,
+          'tasks': result.llmTasks,
+          'reminders': result.llmReminders,
+        });
       });
-    } catch (e) {
-      return ToolResult.fail('Insight generation failed: $e');
-    }
-  }
 }
 
 // ───────────────────────────────────────────────────────────────────────────

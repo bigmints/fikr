@@ -13,6 +13,7 @@ import '../models/app_config.dart';
 import '../models/insights_models.dart';
 import '../models/llm_provider.dart';
 import '../models/note.dart';
+import '../models/scan.dart';
 
 class StorageService extends GetxService {
   StorageService();
@@ -29,6 +30,7 @@ class StorageService extends GetxService {
   late File _insightsFile;
   late File _tasksFile;
   late File _remindersFile;
+  late File _scansFile;
 
   static const _kOnboardingCompleteKey = 'onboarding_complete';
   static const _kSubscriptionKey = 'subscription_tier';
@@ -78,6 +80,7 @@ class StorageService extends GetxService {
       _insightsFile = File(p.join(_baseDir.path, 'insight_editions.json'));
       _tasksFile = File(p.join(_baseDir.path, 'tasks.json'));
       _remindersFile = File(p.join(_baseDir.path, 'reminders.json'));
+      _scansFile = File(p.join(_baseDir.path, 'scans.json'));
       _initCompleter.complete();
     } catch (e, stack) {
       debugPrint('StorageService Init Error: $e');
@@ -225,6 +228,20 @@ class StorageService extends GetxService {
   Future<void> saveReminders(List<ReminderItem> reminders) async {
     await isReady;
     await _remindersFile.writeAsString(ReminderItem.listToJson(reminders));
+  }
+
+  Future<List<Scan>> loadScans() async {
+    await isReady;
+    if (!await _scansFile.exists()) {
+      return [];
+    }
+    final raw = await _scansFile.readAsString();
+    return Scan.listFromJson(raw);
+  }
+
+  Future<void> saveScans(List<Scan> scans) async {
+    await isReady;
+    await _scansFile.writeAsString(Scan.listToJson(scans));
   }
 
   Future<void> clearAll() async {

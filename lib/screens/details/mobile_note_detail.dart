@@ -3,6 +3,8 @@ import 'package:flutter_feather_icons/flutter_feather_icons.dart';
 import 'package:get/get.dart';
 import '../../controllers/theme_controller.dart';
 import '../../utils/app_spacing.dart';
+import '../../widgets/nba_actions_widget.dart';
+import '../../tools/hooks/hook_engine.dart';
 import 'note_detail_controller.dart';
 import 'widgets/detail_audio_player.dart';
 import 'widgets/detail_content.dart';
@@ -90,6 +92,16 @@ class MobileNoteDetail extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     DetailContent(controller: controller),
+                    const SizedBox(height: AppSpacing.xl),
+                    NbaActionsWidget(
+                      context: NbaContext(
+                        source: NbaSource.note,
+                        note: controller.note,
+                        trigger: HookTrigger.onNoteCreated,
+                      ),
+                      trigger: HookTrigger.onNoteCreated,
+                      initiallyExpanded: false,
+                    ),
                     const SizedBox(height: AppSpacing.xl),
                   ],
                 ),

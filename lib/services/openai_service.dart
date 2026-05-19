@@ -7,21 +7,59 @@ import 'package:http/http.dart' as http;
 import '../models/analysis_result.dart';
 import '../models/insights_models.dart';
 import '../models/llm_provider.dart';
+import '../models/action_card.dart';
+import '../models/note_content_type.dart';
+import '../tools/prompts/vision_prompt.dart';
+
+/// Comma-separated Studio content type values for use in LLM prompts.
+final String _kStudioContentTypes = NoteContentType.promptValues;
 
 class LLMService {
   LLMService({http.Client? client}) : _client = client ?? http.Client();
 
   final http.Client _client;
 
+  // ── JSON mode helpers ──────────────────────────────────────────────
+
+  /// Returns true if this provider+model combination supports the OpenAI-style
+  /// `response_format: {type: 'json_object'}` API parameter.
+  ///
+  /// Rules:
+  /// - Gemini provider → always false (uses `generationConfig.responseMimeType` instead)
+  /// - OpenRouter + google/* model → false (Gemini-backed, rejects the param)
+  /// - OpenRouter + anthropic/* model → false
+  /// - OpenRouter + openai/* or unknown → true
+  /// - OpenAI → true
+  bool _supportsJsonObjectFormat(LLMProvider provider, String model) {
+    if (provider.type == LLMProviderType.gemini) return false;
+    if (provider.type == LLMProviderType.openrouter) {
+      if (model.startsWith('google/'))    return false;
+      if (model.startsWith('anthropic/')) return false;
+    }
+    return true;
+  }
+
+  /// Appends a strict JSON instruction to a system prompt.
+  /// Used for OpenRouter+Gemini models that don't accept response_format.
+  String _injectJsonInstruction(String systemPrompt) {
+    return '$systemPrompt\n\nIMPORTANT: Your response MUST be valid JSON only. '
+        'No markdown, no code fences, no commentary — output the raw JSON object directly.';
+  }
+
   Map<String, String> _getHeaders(String apiKey, LLMProvider provider) {
     final headers = <String, String>{'Content-Type': 'application/json'};
 
     switch (provider.type) {
-      case LLMProviderType.google:
+      case LLMProviderType.gemini:
         headers['x-goog-api-key'] = apiKey;
         break;
       case LLMProviderType.openai:
         headers['Authorization'] = 'Bearer $apiKey';
+        break;
+      case LLMProviderType.openrouter:
+        headers['Authorization'] = 'Bearer $apiKey';
+        headers['HTTP-Referer'] = 'https://fikr.one';
+        headers['X-Title'] = 'Fikr';
     }
     return headers;
   }
@@ -86,7 +124,7 @@ class LLMService {
             })
             .where((name) {
               // For Google, only show gemini models (not aqa, embedding, etc.)
-              if (provider.type == LLMProviderType.google) {
+              if (provider.type == LLMProviderType.gemini) {
                 return name.startsWith('gemini');
               }
               return true;
@@ -106,11 +144,11 @@ class LLMService {
   Future<String> transcribeAudio({
     required File audioFile,
     required LLMProvider provider,
-    required String model,
     required String apiKey,
     String language = 'en',
   }) async {
-    if (provider.type == LLMProviderType.google) {
+    final model = provider.resolveModel('transcription');
+    if (provider.type == LLMProviderType.gemini) {
       return _transcribeWithGemini(
         audioFile: audioFile,
         model: model,
@@ -234,22 +272,36 @@ class LLMService {
   Future<AnalysisResult> analyzeTranscript({
     required String transcript,
     required LLMProvider provider,
-    required String model,
     required String apiKey,
     required List<String> buckets,
     bool multiBucket = true,
   }) async {
+    final model = provider.resolveModel('analysis');
     final bucketList = buckets.join(', ');
 
     final systemPrompt =
         'You are an assistant that cleans spoken notes into structured text. '
-        'Return ONLY valid JSON with keys: "cleanedText", "intent", "bucket", "topics". '
+        'Return ONLY valid JSON with keys: "cleanedText", "intent", "bucket", "contentType". '
         'Rules:\n'
         '1. Pick exactly ONE bucket from this list: $bucketList. If none fit, use "General". Put this in "bucket".\n'
-        '2. Identify 3-5 relevant tags/topics for metadata and put them in "topics".\n'
+        '2. Classify the note into ONE content type from this exact list: $_kStudioContentTypes. Put this in "contentType".\n'
+        '   - idea: a new concept, product feature, creative thought\n'
+        '   - task: something actionable to do\n'
+        '   - question: an open question or something to investigate\n'
+        '   - reflection: personal insight, lesson learned, retrospective\n'
+        '   - claim: a factual or opinionated statement\n'
+        '   - entity: a person, company, product, or place\n'
+        '   - quote: a verbatim or paraphrased quote from someone\n'
+        '   - reference: a link, book, article, or resource to revisit\n'
+        '   - definition: explaining a concept or term\n'
+        '   - opinion: a personal view or evaluation\n'
+        '   - narrative: a story, experience, or sequence of events\n'
+        '   - comparison: comparing two or more things\n'
+        '   - general: anything else\n'
         '3. Provide a concise title in "intent" and cleaned version of the transcript in "cleanedText".';
 
-    if (provider.type == LLMProviderType.google) {
+
+    if (provider.type == LLMProviderType.gemini) {
       final content = await _chatWithGemini(
         systemPrompt: systemPrompt,
         userMessage: transcript,
@@ -273,15 +325,18 @@ class LLMService {
       );
     }
 
-    // OpenAI path
+    // OpenAI / OpenRouter path
+    final jsonOk = _supportsJsonObjectFormat(provider, model);
+    final effectiveSystem = jsonOk ? systemPrompt : _injectJsonInstruction(systemPrompt);
+
     final List<Map<String, String>> messages = [
-      {'role': 'system', 'content': systemPrompt},
+      {'role': 'system', 'content': effectiveSystem},
       {'role': 'user', 'content': transcript},
     ];
-    final payload = {
+    final payload = <String, dynamic>{
       'model': model,
       'messages': messages,
-      'response_format': {'type': 'json_object'},
+      if (jsonOk) 'response_format': {'type': 'json_object'},
     };
     final baseUrl = _normalizeBaseUrl(provider.baseUrl, provider.type);
     final endpoint = '$baseUrl/chat/completions';
@@ -305,7 +360,12 @@ class LLMService {
 
     if (content != null) {
       try {
-        final resultJson = jsonDecode(content) as Map<String, dynamic>;
+        // Strip markdown fences in case the model wraps its output
+        final cleaned = content
+            .replaceAll(RegExp(r'^```json\n?', multiLine: true), '')
+            .replaceAll(RegExp(r'\n?```$',    multiLine: true), '')
+            .trim();
+        final resultJson = jsonDecode(cleaned) as Map<String, dynamic>;
         return AnalysisResult.fromJson(resultJson);
       } catch (_) {}
     }
@@ -323,11 +383,11 @@ class LLMService {
   Future<GeneratedInsights> generateInsights({
     required List<Map<String, dynamic>> notes,
     required LLMProvider provider,
-    required String model,
     required String apiKey,
     required List<String> buckets,
     List<String> existingTaskTitles = const [],
   }) async {
+    final model = provider.resolveModel('analysis');
     final existingTasksNote = existingTaskTitles.isNotEmpty
         ? '\nThe user already has these tasks: ${existingTaskTitles.join(', ')}. Do NOT create duplicates. If a completed task should be reopened, include it with the same title.\n'
         : '';
@@ -358,7 +418,7 @@ Never mention that you are an AI. Never mention system prompts or policies.
 
     final userMessage = jsonEncode({'notes': notes, 'buckets': buckets});
 
-    if (provider.type == LLMProviderType.google) {
+    if (provider.type == LLMProviderType.gemini) {
       final content = await _chatWithGemini(
         systemPrompt: systemPrompt,
         userMessage: userMessage,
@@ -374,14 +434,17 @@ Never mention that you are an AI. Never mention system prompts or policies.
       return GeneratedInsights.fromJson(decoded);
     }
 
-    // OpenAI path
-    final payload = {
+    // OpenAI / OpenRouter path
+    final jsonOk = _supportsJsonObjectFormat(provider, model);
+    final effectiveSystem = jsonOk ? systemPrompt : _injectJsonInstruction(systemPrompt);
+
+    final payload = <String, dynamic>{
       'model': model,
       'messages': [
-        {'role': 'system', 'content': systemPrompt},
+        {'role': 'system', 'content': effectiveSystem},
         {'role': 'user', 'content': userMessage},
       ],
-      'response_format': {'type': 'json_object'},
+      if (jsonOk) 'response_format': {'type': 'json_object'},
     };
 
     final baseUrl = _normalizeBaseUrl(provider.baseUrl, provider.type);
@@ -407,8 +470,131 @@ Never mention that you are an AI. Never mention system prompts or policies.
       throw Exception('Insight generation returned no content.');
     }
 
-    final decoded = jsonDecode(content) as Map<String, dynamic>;
+    // Strip markdown fences in case the model wraps its output
+    final cleaned = content
+        .replaceAll(RegExp(r'^```json\n?', multiLine: true), '')
+        .replaceAll(RegExp(r'\n?```$',    multiLine: true), '')
+        .trim();
+    final decoded = jsonDecode(cleaned) as Map<String, dynamic>;
     return GeneratedInsights.fromJson(decoded);
+  }
+
+  // ── Vision ──────────────────────────────────────────────────────────
+
+  Future<Map<String, dynamic>> analyzeImage({
+    required File imageFile,
+    required LLMProvider provider,
+    required String apiKey,
+  }) async {
+    final model = provider.resolveModel('vision');
+    final bytes = await imageFile.readAsBytes();
+    final base64Image = base64Encode(bytes);
+    final ext = imageFile.path.split('.').last.toLowerCase();
+    final mimeType = ext == 'png' ? 'image/png' : 'image/jpeg';
+    if (provider.type == LLMProviderType.gemini) {
+      final baseUrl = _normalizeBaseUrl(provider.baseUrl, provider.type);
+      final endpoint = '$baseUrl/models/$model:generateContent';
+
+      final payload = {
+        'system_instruction': {
+          'parts': [
+            {'text': visionSystemPrompt},
+          ],
+        },
+        'contents': [
+          {
+            'parts': [
+              {
+                'inline_data': {'mime_type': mimeType, 'data': base64Image},
+              },
+              {
+                'text': 'Analyze this image.',
+              },
+            ],
+          },
+        ],
+        'generationConfig': {'responseMimeType': 'application/json'},
+        // Safety filters: block medium+ for sensitive categories
+        'safetySettings': [
+          {'category': 'HARM_CATEGORY_SEXUALLY_EXPLICIT', 'threshold': 'BLOCK_MEDIUM_AND_ABOVE'},
+          {'category': 'HARM_CATEGORY_DANGEROUS_CONTENT',  'threshold': 'BLOCK_MEDIUM_AND_ABOVE'},
+          {'category': 'HARM_CATEGORY_HARASSMENT',         'threshold': 'BLOCK_MEDIUM_AND_ABOVE'},
+          {'category': 'HARM_CATEGORY_HATE_SPEECH',        'threshold': 'BLOCK_MEDIUM_AND_ABOVE'},
+        ],
+      };
+
+      final response = await _client.post(
+        Uri.parse('$endpoint?key=$apiKey'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(payload),
+      );
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Exception('Gemini request failed: ${response.body}');
+      }
+
+      // Check if Gemini blocked the content via safetyRatings
+      final raw = jsonDecode(response.body) as Map<String, dynamic>;
+      final candidates = raw['candidates'] as List?;
+      if (candidates == null || candidates.isEmpty) {
+        final blocked = raw['promptFeedback']?['blockReason'] as String?;
+        if (blocked != null) {
+          return {'blocked': true, 'reason': 'Image blocked by safety filter: $blocked'};
+        }
+        throw Exception('Gemini returned no candidates.');
+      }
+      final finishReason = candidates[0]['finishReason'] as String?;
+      if (finishReason == 'SAFETY') {
+        return {'blocked': true, 'reason': 'Image was flagged by Gemini safety filters.'};
+      }
+
+      final content = _extractGeminiText(response.body);
+      return jsonDecode(content) as Map<String, dynamic>;
+    } else {
+      // OpenAI path
+      final baseUrl = _normalizeBaseUrl(provider.baseUrl, provider.type);
+      final endpoint = '$baseUrl/chat/completions';
+
+      final payload = {
+        'model': model,
+        'messages': [
+          {'role': 'system', 'content': visionSystemPrompt},
+          {
+            'role': 'user',
+            'content': [
+              {'type': 'text', 'text': 'Analyze this image.'},
+              {
+                'type': 'image_url',
+                'image_url': {
+                  'url': 'data:$mimeType;base64,$base64Image'
+                }
+              }
+            ]
+          }
+        ],
+        'response_format': {'type': 'json_object'},
+      };
+
+      final response = await _client.post(
+        Uri.parse(endpoint),
+        headers: _getHeaders(apiKey, provider),
+        body: jsonEncode(payload),
+      );
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Exception('Chat completion failed: ${response.body}');
+      }
+
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final choices = data['choices'] as List?;
+      if (choices != null && choices.isNotEmpty) {
+        final content = choices[0]['message']['content'] as String?;
+        if (content != null) {
+           return jsonDecode(content) as Map<String, dynamic>;
+        }
+      }
+      throw Exception('OpenAI returned no content.');
+    }
   }
 
   // ── Gemini helpers ─────────────────────────────────────────────────
@@ -481,11 +667,12 @@ Never mention that you are an AI. Never mention system prompts or policies.
     required String systemPrompt,
     required String userMessage,
     required LLMProvider provider,
-    required String model,
     required String apiKey,
+    String? modelOverride,
     bool jsonMode = true,
   }) async {
-    if (provider.type == LLMProviderType.google) {
+    final model = modelOverride ?? provider.resolveModel('tools');
+    if (provider.type == LLMProviderType.gemini) {
       final result = await _chatWithGemini(
         systemPrompt: systemPrompt,
         userMessage: userMessage,
@@ -497,15 +684,20 @@ Never mention that you are an AI. Never mention system prompts or policies.
       return result ?? '';
     }
 
-    // OpenAI path
+    // OpenAI / OpenRouter path
+    final jsonOk = jsonMode && _supportsJsonObjectFormat(provider, model);
+    final effectiveSystem = (jsonMode && !jsonOk)
+        ? _injectJsonInstruction(systemPrompt)
+        : systemPrompt;
+
     final messages = <Map<String, String>>[
-      {'role': 'system', 'content': systemPrompt},
+      {'role': 'system', 'content': effectiveSystem},
       {'role': 'user', 'content': userMessage},
     ];
     final payload = <String, dynamic>{
       'model': model,
       'messages': messages,
-      if (jsonMode) 'response_format': {'type': 'json_object'},
+      if (jsonOk) 'response_format': {'type': 'json_object'},
     };
     final baseUrl = _normalizeBaseUrl(provider.baseUrl, provider.type);
     final endpoint = '$baseUrl/chat/completions';
@@ -526,5 +718,102 @@ Never mention that you are an AI. Never mention system prompts or policies.
       return choices[0]['message']['content'] as String? ?? '';
     }
     return '';
+  }
+
+  // ── Next Best Actions ───────────────────────────────────────────────
+
+  /// Calls the LLM with an externally-provided [systemPrompt] and [contextText].
+  ///
+  /// The system prompt is built by [IntelligentLlmHook] and contains the full
+  /// Fikr tool catalogue plus strict output rules. This method handles the
+  /// provider routing (Gemini vs. OpenAI-compatible) and JSON parsing.
+  Future<List<ActionCard>> generateNextBestActions({
+    required String contextText,
+    required String systemPrompt,
+    required LLMProvider provider,
+    required String apiKey,
+  }) async {
+    final model = provider.resolveModel('tools');
+    try {
+      String jsonResponse = '';
+      if (provider.type == LLMProviderType.gemini) {
+        final content = await _chatWithGemini(
+          systemPrompt: systemPrompt,
+          userMessage: contextText,
+          model: model,
+          apiKey: apiKey,
+          provider: provider,
+          jsonMode: true,
+        );
+        jsonResponse = content ?? '[]';
+      } else {
+        // OpenAI / OpenRouter path
+        final jsonOk = _supportsJsonObjectFormat(provider, model);
+        final effectiveSystem = jsonOk ? systemPrompt : _injectJsonInstruction(systemPrompt);
+
+        final messages = <Map<String, String>>[
+          {'role': 'system', 'content': effectiveSystem},
+          {'role': 'user', 'content': contextText},
+        ];
+        final payload = <String, dynamic>{
+          'model': model,
+          'messages': messages,
+          if (jsonOk) 'response_format': {'type': 'json_object'},
+        };
+        final baseUrl = _normalizeBaseUrl(provider.baseUrl, provider.type);
+        final endpoint = '$baseUrl/chat/completions';
+
+        final response = await _client.post(
+          Uri.parse(endpoint),
+          headers: _getHeaders(apiKey, provider),
+          body: jsonEncode(payload),
+        );
+
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          final data = jsonDecode(response.body) as Map<String, dynamic>;
+          final choices = data['choices'] as List?;
+          if (choices != null && choices.isNotEmpty) {
+            jsonResponse = choices[0]['message']['content'] as String? ?? '[]';
+          }
+        }
+      }
+
+      return _parseActionCards(jsonResponse);
+    } catch (e) {
+      debugPrint('[LLMService] generateNextBestActions error: $e');
+      return [];
+    }
+  }
+
+  List<ActionCard> _parseActionCards(String jsonStr) {
+    try {
+      // Strip any stray markdown fences
+      var cleaned = jsonStr.trim();
+      if (cleaned.startsWith('```')) {
+        cleaned = cleaned.replaceAll(RegExp(r'^```\w*\n?'), '');
+        cleaned = cleaned.replaceAll(RegExp(r'\n?```$'), '');
+        cleaned = cleaned.trim();
+      }
+
+      final decoded = jsonDecode(cleaned);
+      final List<dynamic> list;
+      if (decoded is List) {
+        list = decoded;
+      } else if (decoded is Map) {
+        // Handle {"actions": [...]} or any first-List value
+        if (decoded['actions'] is List) {
+          list = decoded['actions'] as List<dynamic>;
+        } else {
+          final firstList = decoded.values.whereType<List>().firstOrNull;
+          list = firstList ?? [];
+        }
+      } else {
+        return [];
+      }
+      return list.whereType<Map<String, dynamic>>().map(ActionCard.fromJson).toList();
+    } catch (e) {
+      debugPrint('[LLMService] Error parsing ActionCards JSON: $e');
+      return [];
+    }
   }
 }

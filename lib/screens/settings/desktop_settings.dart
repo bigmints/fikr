@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_feather_icons/flutter_feather_icons.dart';
 import 'package:get/get.dart';
 import 'package:url_launcher/url_launcher.dart';
-import '../../controllers/app_controller.dart';
+import 'package:fikr/controllers/app_controller.dart';
 import '../../controllers/subscription_controller.dart';
 import '../../controllers/theme_controller.dart';
 import '../../models/subscription_tier.dart';

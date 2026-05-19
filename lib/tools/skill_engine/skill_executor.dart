@@ -1,5 +1,9 @@
 /// Skill Executor — DAG runner that executes skill steps sequentially,
 /// with support for parallel groups, conditional execution, and forEach.
+///
+/// All step execution is delegated through [onStepExecute] so every step
+/// in a skill passes through [EngineController.executeTool], gaining full
+/// tracing, validation, and logging.
 library;
 
 import 'dart:async';
@@ -10,6 +14,14 @@ import '../tool_interface.dart';
 import '../tool_registry.dart';
 import 'skill.dart';
 
+/// Callback that routes a step invocation through the engine.
+/// Signature matches [EngineController.executeTool].
+typedef StepExecuteFn = Future<ToolResult> Function(
+  String toolName,
+  Map<String, dynamic> params,
+  ToolContext context,
+);
+
 class SkillExecutor {
   SkillExecutor({
     ToolRegistry? registry,
@@ -19,11 +31,14 @@ class SkillExecutor {
 
   /// Execute a skill with the given initial variables and context.
   ///
-  /// [initialVars] are pre-populated variables (e.g. `$config.buckets`).
+  /// [onStepExecute] — if provided, all steps are routed through it (e.g.
+  /// [EngineController.executeTool]) to get full tracing + logging.
+  /// If null, falls back to direct tool execution via the registry.
   Future<SkillExecutionResult> execute(
     Skill skill,
     ToolContext context, {
     Map<String, dynamic> initialVars = const {},
+    StepExecuteFn? onStepExecute,
   }) async {
     final vars = Map<String, dynamic>.from(initialVars);
     final stepResults = <StepExecutionResult>[];
@@ -37,7 +52,7 @@ class SkillExecutor {
         // Sequential step
         final step = group.first;
         final result = await _executeStep(
-          step, stepIndex, vars, context,
+          step, stepIndex, vars, context, onStepExecute,
         );
         stepResults.add(result);
 
@@ -57,7 +72,7 @@ class SkillExecutor {
         final futures = <Future<StepExecutionResult>>[];
         final indices = <int>[];
         for (final step in group) {
-          futures.add(_executeStep(step, stepIndex, vars, context));
+          futures.add(_executeStep(step, stepIndex, vars, context, onStepExecute));
           indices.add(stepIndex);
           stepIndex++;
         }
@@ -97,6 +112,7 @@ class SkillExecutor {
     int index,
     Map<String, dynamic> vars,
     ToolContext context,
+    StepExecuteFn? onStepExecute,
   ) async {
     // Check condition
     if (step.condition != null && !_evaluateCondition(step.condition!, vars)) {
@@ -108,37 +124,40 @@ class SkillExecutor {
       );
     }
 
-    // Resolve tool
-    final tool = _registry.get(step.toolName);
-    if (tool == null) {
-      return StepExecutionResult(
-        stepIndex: index,
-        toolName: step.toolName,
-        result: ToolResult.fail('Tool not found: ${step.toolName}'),
-      );
-    }
-
     // forEach — iterate over an array
     if (step.forEach != null) {
-      return _executeForEach(step, index, vars, context, tool);
+      return _executeForEach(step, index, vars, context, onStepExecute);
     }
 
     // Resolve input params
     final params = _resolveInputs(step.input, vars);
 
-    // Execute
+    // Execute — prefer onStepExecute (engine-traced) over direct registry
     ToolResult result;
-    try {
-      result = await tool.execute(params, context);
-    } catch (e) {
-      if (step.onError == StepErrorPolicy.retryOnce) {
-        try {
-          result = await tool.execute(params, context);
-        } catch (retryError) {
-          result = ToolResult.fail('Retry failed: $retryError');
+    if (onStepExecute != null) {
+      final stepCtx = context.childContext(callerToolName: step.toolName);
+      result = await onStepExecute(step.toolName, params, stepCtx);
+    } else {
+      final tool = _registry.get(step.toolName);
+      if (tool == null) {
+        return StepExecutionResult(
+          stepIndex: index,
+          toolName: step.toolName,
+          result: ToolResult.notFound(step.toolName),
+        );
+      }
+      try {
+        result = await tool.execute(params, context);
+      } catch (e) {
+        if (step.onError == StepErrorPolicy.retryOnce) {
+          try {
+            result = await tool.execute(params, context);
+          } catch (retryError) {
+            result = ToolResult.fail('Retry failed: $retryError');
+          }
+        } else {
+          result = ToolResult.fail('$e');
         }
-      } else {
-        result = ToolResult.fail('$e');
       }
     }
 
@@ -147,14 +166,12 @@ class SkillExecutor {
       switch (step.outputMode) {
         case StepOutputMode.store:
           vars[step.outputKey!] = result.data;
-          break;
         case StepOutputMode.merge:
           if (result.data is Map<String, dynamic>) {
             vars.addAll(result.data as Map<String, dynamic>);
           } else {
             vars[step.outputKey!] = result.data;
           }
-          break;
         case StepOutputMode.discard:
           break;
       }
@@ -172,7 +189,7 @@ class SkillExecutor {
     int index,
     Map<String, dynamic> vars,
     ToolContext context,
-    FikrTool tool,
+    StepExecuteFn? onStepExecute,
   ) async {
     final iterableRef = step.forEach!;
     final items = _resolveVariable(iterableRef, vars);
@@ -191,12 +208,24 @@ class SkillExecutor {
       // Make $item available
       vars['item'] = item;
       final params = _resolveInputs(step.input, vars);
-      try {
-        final r = await tool.execute(params, context);
-        if (r.success) results.add(r.data);
-      } catch (e) {
-        debugPrint('forEach step ${step.toolName} failed for item: $e');
+      ToolResult r;
+      if (onStepExecute != null) {
+        final stepCtx = context.childContext(callerToolName: step.toolName);
+        r = await onStepExecute(step.toolName, params, stepCtx);
+      } else {
+        final tool = _registry.get(step.toolName);
+        if (tool == null) {
+          debugPrint('forEach step ${step.toolName}: tool not found');
+          continue;
+        }
+        try {
+          r = await tool.execute(params, context);
+        } catch (e) {
+          debugPrint('forEach step ${step.toolName} failed for item: $e');
+          continue;
+        }
       }
+      if (r.success) results.add(r.data);
     }
     vars.remove('item');
 
@@ -262,14 +291,13 @@ class SkillExecutor {
 
   /// Evaluate a simple condition: `$variable` → truthy check.
   bool _evaluateCondition(String condition, Map<String, dynamic> vars) {
-    if (condition.startsWith(r'$')) {
-      final value = _resolveVariable(condition, vars);
-      return _isTruthy(value);
-    }
-    // Negation: !$variable
     if (condition.startsWith(r'!$')) {
       final value = _resolveVariable(condition.substring(1), vars);
       return !_isTruthy(value);
+    }
+    if (condition.startsWith(r'$')) {
+      final value = _resolveVariable(condition, vars);
+      return _isTruthy(value);
     }
     return true;
   }

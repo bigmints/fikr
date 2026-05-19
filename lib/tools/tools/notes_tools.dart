@@ -4,13 +4,14 @@ library;
 import 'dart:io';
 
 import 'package:get/get.dart';
+import 'package:fikr/tools/app_state_resolver.dart';
 import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import 'package:uuid/uuid.dart';
 
-import '../../controllers/i_app_state.dart';
+import '../../models/analysis_result.dart';
 import '../../models/note.dart';
 import '../tool_interface.dart';
 
@@ -49,6 +50,15 @@ class NotesListTool extends FikrTool {
         'enum': ['newest', 'oldest', 'updated'],
         'default': 'newest',
       },
+      'minTextLength': {
+        'type': 'integer',
+        'description': 'Minimum character length of text/transcript to include.',
+      },
+      'excludeArchived': {
+        'type': 'boolean',
+        'default': true,
+        'description': 'Exclude archived/deleted notes. Defaults to true.',
+      },
     },
   };
 
@@ -64,7 +74,7 @@ class NotesListTool extends FikrTool {
     ToolContext context,
   ) async {
     try {
-      final ctrl = Get.find<IAppState>();
+      final ctrl = appState();
       final bucket = params['bucket'] as String? ?? 'All';
       final search = params['search'] as String? ?? '';
       final limit = params['limit'] as int? ?? 50;
@@ -72,9 +82,23 @@ class NotesListTool extends FikrTool {
 
       var notes = ctrl.notes.toList();
 
+      // Always exclude archived notes unless caller explicitly opts in
+      final excludeArchived = params['excludeArchived'] as bool? ?? true;
+      if (excludeArchived) {
+        notes = notes.where((n) => !n.archived).toList();
+      }
+
       // Bucket filter
       if (bucket != 'All') {
         notes = notes.where((n) => n.bucket == bucket).toList();
+      }
+
+      final minTextLength = params['minTextLength'] as int?;
+      if (minTextLength != null) {
+        notes = notes.where((n) {
+          final content = n.text.isNotEmpty ? n.text : n.transcript;
+          return content.trim().length >= minTextLength;
+        }).toList();
       }
 
       // Search filter
@@ -111,6 +135,7 @@ class NotesListTool extends FikrTool {
             .map((n) => {
                   'id': n.id,
                   'title': n.title,
+                  'text': n.text.isNotEmpty ? n.text : n.transcript,
                   'bucket': n.bucket,
                   'createdAt': n.createdAt.toIso8601String(),
                   'topics': n.topics,
@@ -156,7 +181,7 @@ class NotesGetTool extends FikrTool {
     ToolContext context,
   ) async {
     try {
-      final ctrl = Get.find<IAppState>();
+      final ctrl = appState();
       final id = params['id'] as String;
       final note = ctrl.notes.firstWhereOrNull((n) => n.id == id);
       if (note == null) return ToolResult.fail('Note not found: $id');
@@ -206,7 +231,7 @@ class NotesCreateTool extends FikrTool {
     ToolContext context,
   ) async {
     try {
-      final ctrl = Get.find<IAppState>();
+      final ctrl = appState();
       final now = DateTime.now();
       final note = Note(
         id: const Uuid().v4(),
@@ -270,7 +295,7 @@ class NotesUpdateTool extends FikrTool {
     ToolContext context,
   ) async {
     try {
-      final ctrl = Get.find<IAppState>();
+      final ctrl = appState();
       final id = params['id'] as String;
       final existing = ctrl.notes.firstWhereOrNull((n) => n.id == id);
       if (existing == null) return ToolResult.fail('Note not found: $id');
@@ -325,7 +350,7 @@ class NotesArchiveTool extends FikrTool {
     ToolContext context,
   ) async {
     try {
-      final ctrl = Get.find<IAppState>();
+      final ctrl = appState();
       await ctrl.archiveNote(params['id'] as String);
       return ToolResult.ok({'archived': params['id']});
     } catch (e) {
@@ -367,7 +392,7 @@ class NotesDeleteTool extends FikrTool {
     ToolContext context,
   ) async {
     try {
-      final ctrl = Get.find<IAppState>();
+      final ctrl = appState();
       await ctrl.deleteNote(params['id'] as String);
       return ToolResult.ok({'deleted': params['id']});
     } catch (e) {
@@ -395,6 +420,11 @@ class NotesSearchTool extends FikrTool {
     'properties': {
       'query': {'type': 'string', 'description': 'Search query'},
       'limit': {'type': 'integer', 'default': 20},
+      'excludeArchived': {
+        'type': 'boolean',
+        'default': true,
+        'description': 'Exclude archived/deleted notes. Defaults to true.',
+      },
     },
     'required': ['query'],
   };
@@ -410,11 +440,12 @@ class NotesSearchTool extends FikrTool {
     Map<String, dynamic> params,
     ToolContext context,
   ) async {
-    // Delegate to notes.list with search param
+    // Delegate to notes.list with search param — inherits excludeArchived logic
     final listTool = NotesListTool();
     return listTool.execute({
       'search': params['query'],
       'limit': params['limit'] ?? 20,
+      'excludeArchived': params['excludeArchived'] ?? true,
     }, context);
   }
 }
@@ -455,7 +486,7 @@ class NotesExportTool extends FikrTool {
     ToolContext context,
   ) async {
     try {
-      final ctrl = Get.find<IAppState>();
+      final ctrl = appState();
       String? dir = params['directory'] as String?;
 
       if (dir == null || dir.isEmpty) {
@@ -481,6 +512,103 @@ class NotesExportTool extends FikrTool {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+//  notes.finalize
+// ───────────────────────────────────────────────────────────────────────────
+
+/// The canonical end-point of the voice-note AI pipeline.
+///
+/// Takes the raw AI analysis result, constructs the final [Note] object,
+/// inserts it into app state, persists, and triggers NBA hooks — all in
+/// one traceable tool call.
+class NotesFinalizeNoteTool extends FikrTool with FikrToolMixin {
+  @override
+  String get name => 'notes.finalize';
+
+  @override
+  String get description =>
+      'Build and persist the final note after AI transcription + analysis. '
+      'Accepts analysis JSON and audioPath, inserts note into state, '
+      'persists storage, and returns the saved note as JSON.';
+
+  @override
+  Map<String, dynamic> get parametersSchema => {
+        'type': 'object',
+        'properties': {
+          'id': {'type': 'string', 'description': 'Pre-generated note UUID.'},
+          'createdAt': {
+            'type': 'string',
+            'description': 'ISO 8601 timestamp of note creation.',
+          },
+          'audioPath': {'type': 'string', 'description': 'Absolute path to local audio file.'},
+          'transcript': {'type': 'string', 'description': 'Raw transcript text.'},
+          'analysis': {
+            'type': 'object',
+            'description': 'AnalysisResult JSON from ai.analyze tool.',
+          },
+          'transcriptStyle': {
+            'type': 'string',
+            'enum': ['cleaned', 'raw'],
+            'default': 'cleaned',
+          },
+        },
+        'required': ['id', 'createdAt', 'audioPath', 'transcript', 'analysis'],
+      };
+
+  @override
+  ToolTier get requiredTier => ToolTier.free;
+
+  @override
+  ToolLocation get location => ToolLocation.local;
+
+  @override
+  List<String> get tags => ['notes', 'ai', 'pipeline'];
+
+  @override
+  Future<ToolResult> execute(
+    Map<String, dynamic> params,
+    ToolContext context,
+  ) =>
+      guard(context, () async {
+        final ctrl = appState();
+        final id = params['id'] as String;
+        final createdAtStr = params['createdAt'] as String;
+        final audioPath = params['audioPath'] as String;
+        final transcript = params['transcript'] as String;
+        final analysisJson = params['analysis'] as Map<String, dynamic>;
+        final transcriptStyle = params['transcriptStyle'] as String? ?? 'cleaned';
+
+        DateTime createdAt;
+        try {
+          createdAt = DateTime.parse(createdAtStr);
+        } catch (_) {
+          createdAt = DateTime.now();
+        }
+
+        final analysis = AnalysisResult.fromJson(analysisJson);
+        context.logger.info('Finalizing note', data: {
+          'id': id,
+          'bucket': analysis.bucket,
+          'topics': analysis.topics,
+        });
+
+        final note = await ctrl.finalizeNote(
+          id: id,
+          createdAt: createdAt,
+          audioPath: audioPath,
+          transcript: transcript,
+          analysis: analysis,
+          transcriptStyle: transcriptStyle,
+        );
+
+        context.logger.info('Note finalized', data: {'title': note.title});
+        return ToolResult.ok(
+          note.toJson(),
+        );
+      });
+
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 //  Convenience: get all notes tools
 // ───────────────────────────────────────────────────────────────────────────
 
@@ -493,4 +621,5 @@ List<FikrTool> allNotesTools() => [
       NotesDeleteTool(),
       NotesSearchTool(),
       NotesExportTool(),
+      NotesFinalizeNoteTool(),
     ];

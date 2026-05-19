@@ -13,7 +13,6 @@ import 'package:get/get.dart';
 
 import '../../controllers/subscription_controller.dart';
 import '../../services/fikr_api_service.dart';
-import '../../services/firebase_service.dart';
 import '../../services/openai_service.dart';
 
 import '../tool_interface.dart';
@@ -182,14 +181,13 @@ Respond with ONLY valid JSON. Choose one of these formats:
       throw StateError('Missing API key.');
     }
 
-    final byokModels = FirebaseService().getByokModels(provider.type);
     final llmService = Get.find<LLMService>();
 
     return llmService.chatCompletion(
       systemPrompt: systemPrompt,
       userMessage: userMessage,
       provider: provider,
-      model: byokModels.analysis,
+      
       apiKey: apiKey,
     );
   }

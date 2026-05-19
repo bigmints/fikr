@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_feather_icons/flutter_feather_icons.dart';
 import 'package:get/get.dart';
+import 'package:image_picker/image_picker.dart';
 import '../../controllers/record_controller.dart';
 import '../../controllers/theme_controller.dart';
+import '../../controllers/vision_controller.dart';
+import '../../widgets/expandable_fab.dart';
 
 class MobileShell extends StatelessWidget {
   const MobileShell({
@@ -94,7 +97,7 @@ class MobileShell extends StatelessWidget {
                 onTap: () => onSelect(1),
                 colorScheme: colorScheme,
               ),
-              const SizedBox(width: 48), // FAB gap
+
               _NavItem(
                 icon: FeatherIcons.checkSquare,
                 label: 'Tasks',
@@ -114,25 +117,114 @@ class MobileShell extends StatelessWidget {
         ),
       ),
 
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
       floatingActionButton: Obx(() {
         final isRecording = recordController.isRecording.value;
-        return SizedBox(
-          height: 64,
-          width: 64,
-          child: FloatingActionButton(
-            onPressed: onRecord,
-            elevation: 4,
-            backgroundColor: isRecording
-                ? AppPalette.danger
-                : AppPalette.primary,
-            shape: const CircleBorder(),
-            child: isRecording
-                ? const Icon(FeatherIcons.square, color: Colors.white, size: 24)
-                : const Icon(FeatherIcons.mic, color: Colors.white, size: 28),
+        if (isRecording) {
+          return SizedBox(
+            height: 64,
+            width: 64,
+            child: FloatingActionButton(
+              onPressed: onRecord,
+              elevation: 4,
+              backgroundColor: AppPalette.danger,
+              shape: const CircleBorder(),
+              child: const Icon(
+                FeatherIcons.square,
+                color: Colors.white,
+                size: 24,
+              ),
+            ),
+          );
+        }
+
+        return ExpandableFab(
+          distance: 72,
+          mainIcon: const Icon(
+            FeatherIcons.plus,
+            color: Colors.white,
+            size: 28,
           ),
+          backgroundColor: AppPalette.primary,
+          children: [
+            SizedBox(
+              width: 52,
+              height: 52,
+              child: FloatingActionButton(
+                heroTag: 'fab_mic',
+                onPressed: onRecord,
+                backgroundColor: AppPalette.primary,
+                elevation: 4,
+                shape: const CircleBorder(),
+                child: const Icon(
+                  FeatherIcons.mic,
+                  color: Colors.white,
+                  size: 22,
+                ),
+              ),
+            ),
+            SizedBox(
+              width: 52,
+              height: 52,
+              child: FloatingActionButton(
+                heroTag: 'fab_camera',
+                onPressed: () {
+                  final visionCtrl = Get.isRegistered<VisionController>()
+                      ? Get.find<VisionController>()
+                      : Get.put(VisionController());
+                  _showVisionPickerOptions(context, visionCtrl);
+                },
+                backgroundColor: colorScheme.secondary,
+                elevation: 4,
+                shape: const CircleBorder(),
+                child: const Icon(
+                  FeatherIcons.camera,
+                  color: Colors.white,
+                  size: 22,
+                ),
+              ),
+            ),
+          ],
         );
       }),
+    );
+  }
+
+  void _showVisionPickerOptions(
+    BuildContext context,
+    VisionController controller,
+  ) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(FeatherIcons.camera),
+                title: const Text('Take a Photo'),
+                onTap: () {
+                  Navigator.pop(context);
+                  controller.pickAndAnalyse(ImageSource.camera);
+                },
+              ),
+              ListTile(
+                leading: const Icon(FeatherIcons.image),
+                title: const Text('Choose from Gallery'),
+                onTap: () {
+                  Navigator.pop(context);
+                  controller.pickAndAnalyse(ImageSource.gallery);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

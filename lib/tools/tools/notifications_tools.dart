@@ -1,9 +1,10 @@
 /// Notifications domain tools — in-app and push notifications.
 library;
 
-
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:get/get.dart';
 
+import '../../services/fikr_api_service.dart';
 import '../../services/toast_service.dart';
 import '../tool_interface.dart';
 
@@ -11,7 +12,7 @@ import '../tool_interface.dart';
 //  notify.in_app
 // ───────────────────────────────────────────────────────────────────────────
 
-class NotifyInAppTool extends FikrTool {
+class NotifyInAppTool extends FikrTool with FikrToolMixin {
   @override
   String get name => 'notify.in_app';
 
@@ -41,11 +42,13 @@ class NotifyInAppTool extends FikrTool {
   ToolLocation get location => ToolLocation.local;
 
   @override
+  List<String> get tags => ['notify', 'ui'];
+
+  @override
   Future<ToolResult> execute(
     Map<String, dynamic> params,
     ToolContext context,
-  ) async {
-    try {
+  ) => guard(context, () async {
       final ctx = Get.context;
       if (ctx == null) return ToolResult.fail('No UI context available.');
 
@@ -65,17 +68,14 @@ class NotifyInAppTool extends FikrTool {
       }
 
       return ToolResult.ok({'notified': true, 'type': type});
-    } catch (e) {
-      return ToolResult.fail('Notification failed: $e');
-    }
-  }
+  });
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-//  notify.push (placeholder — FCM implementation in Phase 5)
+//  notify.push
 // ───────────────────────────────────────────────────────────────────────────
 
-class NotifyPushTool extends FikrTool {
+class NotifyPushTool extends FikrTool with FikrToolMixin {
   @override
   String get name => 'notify.push';
 
@@ -101,13 +101,33 @@ class NotifyPushTool extends FikrTool {
   ToolLocation get location => ToolLocation.cloud;
 
   @override
+  List<String> get tags => ['notify', 'push'];
+
+  @override
   Future<ToolResult> execute(
     Map<String, dynamic> params,
     ToolContext context,
-  ) async {
-    // Phase 5 — FCM send via fikr.one
-    return ToolResult.fail('Push notifications not yet implemented.');
-  }
+  ) => guard(context, () async {
+    final token = await FirebaseMessaging.instance.getToken();
+    if (token == null) {
+      return ToolResult.fail('No FCM token available on this device.');
+    }
+    
+    final title = params['title'] as String;
+    final body = params['body'] as String;
+    
+    final success = await FikrApiService().sendPushNotification(
+      token: token,
+      title: title,
+      body: body,
+    );
+    
+    if (success) {
+      return ToolResult.ok({'notified': true, 'push_sent': true});
+    } else {
+      return ToolResult.fail('Backend failed to send push notification.');
+    }
+  });
 }
 
 // ───────────────────────────────────────────────────────────────────────────

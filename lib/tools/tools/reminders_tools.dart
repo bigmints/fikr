@@ -1,11 +1,13 @@
 /// Reminders domain tools — manage time-sensitive reminder items.
 library;
 
-import 'package:get/get.dart';
+import 'dart:async';
+
+import 'package:fikr/tools/app_state_resolver.dart';
 import 'package:uuid/uuid.dart';
 
-import '../../controllers/i_app_state.dart';
 import '../../models/insights_models.dart';
+import '../../services/notification_service.dart';
 import '../tool_interface.dart';
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -44,7 +46,7 @@ class RemindersListTool extends FikrTool {
     ToolContext context,
   ) async {
     try {
-      final ctrl = Get.find<IAppState>();
+      final ctrl = appState();
       final includeAll = params['includeDissmissed'] as bool? ?? false;
 
       var items = ctrl.reminders.toList();
@@ -101,7 +103,7 @@ class RemindersCreateTool extends FikrTool {
     ToolContext context,
   ) async {
     try {
-      final ctrl = Get.find<IAppState>();
+      final ctrl = appState();
       final item = ReminderItem(
         id: const Uuid().v4(),
         title: params['title'] as String,
@@ -111,6 +113,10 @@ class RemindersCreateTool extends FikrTool {
       );
       ctrl.reminders.add(item);
       await ctrl.saveReminders();
+
+      // Schedule OS-level notification so it fires even when app is closed
+      unawaited(NotificationService.instance.scheduleReminder(item));
+
       return ToolResult.ok(item.toJson());
     } catch (e) {
       return ToolResult.fail('Failed to create reminder: $e');
@@ -150,13 +156,17 @@ class RemindersDismissTool extends FikrTool {
     ToolContext context,
   ) async {
     try {
-      final ctrl = Get.find<IAppState>();
+      final ctrl = appState();
       final id = params['id'] as String;
       final index = ctrl.reminders.indexWhere((r) => r.id == id);
       if (index == -1) return ToolResult.fail('Reminder not found: $id');
 
       ctrl.reminders[index] = ctrl.reminders[index].copyWith(isDismissed: true);
       await ctrl.saveReminders();
+
+      // Cancel any pending OS notification
+      unawaited(NotificationService.instance.cancelReminder(id));
+
       return ToolResult.ok({'dismissed': id});
     } catch (e) {
       return ToolResult.fail('Failed to dismiss reminder: $e');
@@ -198,21 +208,30 @@ class RemindersRescheduleTool extends FikrTool {
     ToolContext context,
   ) async {
     try {
-      final ctrl = Get.find<IAppState>();
+      final ctrl = appState();
       final id = params['id'] as String;
       final index = ctrl.reminders.indexWhere((r) => r.id == id);
       if (index == -1) return ToolResult.fail('Reminder not found: $id');
 
       final old = ctrl.reminders[index];
-      ctrl.reminders[index] = ReminderItem(
+      final updated = ReminderItem(
         id: old.id,
         title: old.title,
         date: DateTime.parse(params['date'] as String),
         time: params['time'] as String? ?? old.time,
         sourceNoteId: old.sourceNoteId,
-        isDismissed: false, // un-dismiss when rescheduling
+        isDismissed: false,
       );
+      ctrl.reminders[index] = updated;
       await ctrl.saveReminders();
+
+      // Cancel old notification and re-schedule
+      unawaited(
+        NotificationService.instance.cancelReminder(id).then(
+          (_) => NotificationService.instance.scheduleReminder(updated),
+        ),
+      );
+
       return ToolResult.ok(ctrl.reminders[index].toJson());
     } catch (e) {
       return ToolResult.fail('Failed to reschedule reminder: $e');

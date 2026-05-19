@@ -1,10 +1,13 @@
-import 'package:fikr/models/app_config.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import '../../controllers/app_controller.dart';
+import 'package:fikr/controllers/app_controller.dart';
+import '../../models/app_config.dart';
 import '../../models/note.dart';
+import '../../models/scan.dart';
+import '../../models/feed_item.dart';
 import '../note_detail_screen.dart';
 import 'widgets/note_card.dart';
+import '../vision/widgets/scan_card.dart';
 
 class DesktopHome extends StatelessWidget {
   const DesktopHome({
@@ -14,8 +17,8 @@ class DesktopHome extends StatelessWidget {
     required this.emptyState,
   });
 
-  final List<Note> notes;
-  final List<Note> allNotes;
+  final List<FeedItem> notes;
+  final List<FeedItem> allNotes;
   final Widget emptyState;
 
   @override
@@ -57,11 +60,17 @@ class DesktopHome extends StatelessWidget {
                         : 2.5,
                   ),
                   itemBuilder: (context, index) {
-                    final note = notes[index];
-                    return NoteCard(
-                      note: note,
-                      onTap: () => NoteDetailScreen.show(context, note),
-                    );
+                    final item = notes[index];
+                    if (item is Scan) {
+                      return ScanCard(scan: item);
+                    }
+                    if (item is Note) {
+                      return NoteCard(
+                        note: item,
+                        onTap: () => NoteDetailScreen.show(context, item),
+                      );
+                    }
+                    return const SizedBox.shrink();
                   },
                 ),
               ),
@@ -85,7 +94,7 @@ class DesktopHome extends StatelessWidget {
 class _FiltersSidebar extends StatelessWidget {
   const _FiltersSidebar({required this.allNotes});
 
-  final List<Note> allNotes;
+  final List<FeedItem> allNotes;
 
   @override
   Widget build(BuildContext context) {

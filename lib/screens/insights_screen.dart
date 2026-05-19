@@ -1,4 +1,4 @@
-import 'package:fikr/models/note.dart';
+import '../models/note.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'insights/desktop_insights.dart';
@@ -11,7 +11,7 @@ import '../utils/app_spacing.dart';
 import '../utils/app_typography.dart';
 import '../utils/layout.dart';
 
-import '../controllers/app_controller.dart';
+import 'package:fikr/controllers/app_controller.dart';
 import '../models/insights_models.dart';
 import '../widgets/empty_state.dart';
 
